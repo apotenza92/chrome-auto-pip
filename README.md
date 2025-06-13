@@ -8,14 +8,14 @@ Includes one click activation of Picture-in-Picture through plugin icon.
 
 ## Installation
 
-1. **Install the extension** 
-- (Link to Chrome Store coming soon)
-
-2. **Enable the browser flag**
+1. **Enable the browser flag (REQUIRED)**
 - Go to `about://flags` in your browser
 - Search for "Auto picture in picture for video playback"
 - Set it to **Enabled**
 - Restart your browser
+
+2. **Install the extension** 
+- (Link to Chrome Store coming soon)
 
 ## Usage
 
