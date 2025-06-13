@@ -9,17 +9,20 @@ Includes one click activation of Picture-in-Picture through plugin icon.
 ## Installation
 
 1. **Enable the browser flag (REQUIRED)**
-**Chrome**: Go to [chrome://flags/#auto-picture-in-picture-for-video-playback](chrome://flags/#auto-picture-in-picture-for-video-playback)
 
-**Brave**: Go to [brave://flags/#auto-picture-in-picture-for-video-playback](brave://flags/#auto-picture-in-picture-for-video-playback)
+    **Chrome**: Go to [chrome://flags/#auto-picture-in-picture-for-video-playback](chrome://flags/#auto-picture-in-picture-for-video-playback)
 
-**Other browsers**: Go to `about://flags` and search for "Auto picture in picture for video playback"
+    **Brave**: Go to [brave://flags/#auto-picture-in-picture-for-video-playback](brave://flags/#auto-picture-in-picture-for-video-playback)
 
-Set it to **Enabled**
-Restart your browser
+    **Other browsers**: Go to `about://flags` and search for "Auto picture in picture for video playback"
+
+    Set it to **Enabled**
+
+    Restart your browser
 
 2. **Install the extension** 
-(Link to Chrome Store coming soon)
+
+    (Link to Chrome Store coming soon)
 
 ## Usage
 
