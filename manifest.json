@@ -9,6 +9,10 @@
   "background": {
     "service_worker": "main.js"
   },
+  "action": {
+    "default_title": "Activate Picture-in-Picture",
+    "default_icon": "assets/icon.png"
+  },
   "permissions": [
     "scripting",
     "storage",
