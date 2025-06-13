@@ -1,0 +1,37 @@
+{
+  "name": "Automatic Picture-in-Picture (PiP)",
+  "description": "Automatically enables Picture-in-Picture when switching tabs away from videos. Setup: Go to about://flags and enable 'Auto-picture-in-picture for video playback'. GitHub: https://github.com/apotenza92/chrome-auto-pip",
+  "version": "0.1.0",
+  "manifest_version": 3,
+  "icons": {
+    "128": "assets/icon.png"
+  },
+  "action": {
+    "default_popup": "./popup/options.html"
+  },
+  "background": {
+    "service_worker": "main.js"
+  },
+  "permissions": [
+    "scripting",
+    "storage",
+    "tabs",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "minimum_chrome_version": "134",
+  "author": "Alex Potenza",
+  "homepage_url": "https://github.com/apotenza92/chrome-auto-pip"
+}
