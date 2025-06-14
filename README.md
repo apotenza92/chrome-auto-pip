@@ -10,11 +10,9 @@ Includes one click activation of Picture-in-Picture through plugin icon.
 
 1. **Enable the browser flag (REQUIRED)**
 
-   Go to `about://flags` and search for `auto-picture-in-picture-for-video-playback`
-   
-   Set the flag to **Enabled**
-   
-   Restart your browser
+   1. Go to `about://flags` and search for `auto-picture-in-picture-for-video-playback`
+   2. Set the flag to **Enabled**
+   3. Restart your browser
 
 2. **Install the extension** 
 
