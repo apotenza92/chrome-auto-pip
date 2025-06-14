@@ -10,8 +10,12 @@
     "service_worker": "main.js"
   },
   "action": {
-    "default_title": "Activate Picture-in-Picture",
+    "default_title": "Picture-in-Picture",
     "default_icon": "assets/icon.png"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
   },
   "permissions": [
     "scripting",

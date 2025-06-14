@@ -1,18 +1,12 @@
 // Function to immediately request PiP when icon is clicked
-function immediatelyRequestPiP() {
+async function immediatelyRequestPiP() {
     console.log("=== IMMEDIATE PIP REQUEST ===");
 
-    // First check if any video is already in PiP mode
-    const pipVideo = document.querySelector('[__pip__]');
-    if (pipVideo || document.pictureInPictureElement) {
-        console.log("🔄 Video already in PiP - toggling off");
+    // Check if PiP is active on current tab
+    if (document.pictureInPictureElement) {
+        console.log("🔄 PiP is active on current tab - exiting PiP");
         try {
-            if (document.pictureInPictureElement) {
-                document.exitPictureInPicture();
-            }
-            if (pipVideo) {
-                pipVideo.removeAttribute('__pip__');
-            }
+            document.exitPictureInPicture();
             console.log("✅ PiP deactivated successfully!");
             return "toggled_off";
         } catch (error) {
@@ -20,6 +14,18 @@ function immediatelyRequestPiP() {
             return false;
         }
     }
+
+    // Also check for local PiP markers on current tab
+    const pipVideo = document.querySelector('[__pip__]');
+    if (pipVideo) {
+        console.log("🔄 Local video marked as PiP - cleaning up");
+        pipVideo.removeAttribute('__pip__');
+        console.log("✅ Local PiP marker removed!");
+        return "toggled_off";
+    }
+
+    // No PiP active on current tab, proceed with activation
+    console.log("🎯 No PiP detected on current tab, proceeding with activation");
 
     // Find any video that can support PiP (both playing and paused for manual activation)
     const videos = Array.from(document.querySelectorAll('video'))
