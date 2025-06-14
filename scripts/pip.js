@@ -65,18 +65,10 @@ async function requestPictureInPicture(video) {
     currentTime: video.currentTime
   });
 
-  // If video is ready but not playing, start it first
-  if (video.paused && video.readyState >= 3) {
-    console.log("Video is paused but ready, attempting to start playback...");
-    try {
-      await video.play();
-      // Wait a brief moment for playback to stabilize
-      await new Promise(resolve => setTimeout(resolve, 100));
-      console.log("Video playback started successfully");
-    } catch (error) {
-      console.log("Could not auto-start video for PiP:", error);
-      return false;
-    }
+  // Don't start paused videos - respect user's pause action
+  if (video.paused) {
+    console.log("Video is paused - skipping PiP (respecting user's pause action)");
+    return false;
   }
 
   console.log("Attempting to request Picture-in-Picture...");
@@ -133,12 +125,13 @@ function setupAutoPiPSupport() {
       console.log("Auto-PiP triggered by MediaSession API");
       const video = getVideos();
       if (video) {
-        // Start video if paused
-        if (video.paused && video.readyState >= 3) {
-          await video.play();
+        // Don't start paused videos - respect user's pause action
+        if (video.paused) {
+          console.log("Video is paused - skipping auto-PiP");
+          return false;
         }
 
-        // Request PiP - this will work without user gesture!
+        // Request PiP - only for playing videos
         await video.requestPictureInPicture();
         video.setAttribute('__pip__', true);
         video.addEventListener('leavepictureinpicture', event => {

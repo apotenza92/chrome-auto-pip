@@ -51,22 +51,22 @@ if (typeof chrome !== 'undefined' && chrome.action) {
       return;
     }
 
-    // First setup MediaSession auto-PiP for future tab switches
+    // First try immediate PiP (works with both playing and paused videos)
+    safeExecuteScript(tab.id, ['./scripts/immediate-pip.js'], (pipResults) => {
+      if (pipResults && pipResults[0]) {
+        console.log("Immediate PiP activation result:", pipResults[0].result);
+      }
+    });
+
+    // Separately, try to setup auto-PiP for future tab switches (only if playing videos exist)
     safeExecuteScript(tab.id, ['./scripts/trigger-auto-pip.js'], (results) => {
       if (results && results[0] && results[0].result) {
         console.log("MediaSession setup result:", results[0].result);
         // Set this as the target tab for future auto-switching
         targetTab = tab.id;
         console.log("Set targetTab to:", targetTab);
-
-        // Now immediately request PiP
-        safeExecuteScript(tab.id, ['./scripts/immediate-pip.js'], (pipResults) => {
-          if (pipResults && pipResults[0]) {
-            console.log("Immediate PiP activation result:", pipResults[0].result);
-          }
-        });
       } else {
-        console.log("MediaSession setup failed or returned false");
+        console.log("MediaSession setup failed or returned false (no playing videos for auto-PiP)");
       }
     });
   });
@@ -112,17 +112,12 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
     function checkAndActivatePiP() {
       // --- [2] : Exit PiP *(if user is in target tab)  ---
       if (currentTab === targetTab) {
-        console.log(">> [2] Exit PiP (user is in target tab)")
+        console.log(">> [2] User returned to target tab - clearing targetTab")
 
-        // Execute Exit PiP
-        safeExecuteScript(targetTab, ['./scripts/pip.js'], (results) => {
-          if (results && results[0]) {
-            console.log("PiP:", results[0].result);
-          }
-          targetTab = null;
-        });
+        // Just clear the targetTab - don't interfere with the video at all
+        targetTab = null;
 
-        // If page has a video, set targetTab and setup auto-PiP
+        // If page has a playing video, set it as new targetTab and setup auto-PiP
         safeExecuteScript(currentTab, ['./scripts/check-video.js'], (results) => {
           const hasVideo = results && results[0] && results[0].result;
           console.log("Has Video:", hasVideo);

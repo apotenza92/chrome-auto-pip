@@ -8,19 +8,14 @@ function triggerAutoPiP() {
         return false;
     }
 
-    // Find the main video element with improved detection for autoplay
+    // Find actively playing videos for automatic PiP
     const videos = Array.from(document.querySelectorAll('video'))
         .filter(video => video.readyState >= 1) // More lenient - allow HAVE_METADATA
         .filter(video => video.disablePictureInPicture == false)
         .filter(video => {
+            // ONLY playing videos for automatic PiP
             const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
-            const isReadyToPlay = video.readyState >= 3 && !video.ended && video.duration > 0;
-            // Check for autoplay videos that might be paused but have autoplay attribute
-            const hasAutoplay = video.autoplay && !video.ended;
-            // Check for videos with sufficient metadata that could be played
-            const hasPlayableContent = video.readyState >= 2 && video.duration > 0 && !video.ended;
-
-            return isPlaying || isReadyToPlay || hasAutoplay || hasPlayableContent;
+            return isPlaying;
         })
         .sort((v1, v2) => {
             const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
@@ -29,7 +24,7 @@ function triggerAutoPiP() {
         });
 
     if (videos.length === 0) {
-        console.log("❌ No suitable video found for auto-PiP");
+        console.log("❌ No playing videos found for auto-PiP");
         return false;
     }
 
@@ -52,39 +47,26 @@ function triggerAutoPiP() {
         navigator.mediaSession.setActionHandler("enterpictureinpicture", async () => {
             console.log("🚀 Auto-PiP triggered by tab switch!");
 
-            // For autoplay videos, we might need to wait a bit for them to start
-            let videoToUse = video;
-
-            // If the video has autoplay but isn't playing, try to find a playing one or start it
-            if (video.autoplay && video.paused && video.readyState >= 2) {
-                console.log("⏯️ Autoplay video is paused, attempting to start");
-                try {
-                    await video.play();
-                    console.log("✅ Successfully started autoplay video");
-                } catch (playError) {
-                    console.log("⚠️ Could not start autoplay video:", playError.message);
-                    // Try to find another video that's already playing
-                    const playingVideos = Array.from(document.querySelectorAll('video'))
-                        .filter(v => !v.paused && v.currentTime > 0 && !v.ended);
-                    if (playingVideos.length > 0) {
-                        videoToUse = playingVideos[0];
-                        console.log("🔄 Using already playing video instead");
-                    }
-                }
+            // Double-check that the video is still playing before activating PiP
+            if (video.paused || video.ended) {
+                console.log("❌ Video is paused or ended - aborting auto-PiP");
+                return;
             }
 
-            // Ensure video is playing for PiP
-            if (videoToUse.paused && videoToUse.readyState >= 3) {
-                console.log("▶️ Starting paused video for PiP");
-                try {
-                    await videoToUse.play();
-                } catch (playError) {
-                    console.log("⚠️ Could not start video for PiP:", playError.message);
-                }
+            // Look for currently playing videos (in case the original stopped)
+            const currentlyPlayingVideos = Array.from(document.querySelectorAll('video'))
+                .filter(v => !v.paused && v.currentTime > 0 && !v.ended && !v.disablePictureInPicture);
+
+            if (currentlyPlayingVideos.length === 0) {
+                console.log("❌ No playing videos found at tab switch - aborting auto-PiP");
+                return;
             }
 
-            // Request PiP - this should work without user gesture!
+            const videoToUse = currentlyPlayingVideos[0];
+
+            // Request PiP - only for playing videos!
             try {
+                console.log("📺 Requesting PiP for playing video");
                 await videoToUse.requestPictureInPicture();
                 videoToUse.setAttribute('__pip__', true);
                 videoToUse.addEventListener('leavepictureinpicture', event => {

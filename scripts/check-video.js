@@ -32,20 +32,11 @@ function hasPlayingVideo() {
       return pass;
     })
     .filter(video => {
+      // ONLY consider videos that are actively playing for automatic PiP
       const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
-      const isReadyToPlay = video.readyState >= 3 && !video.ended && video.duration > 0;
-      // Check for autoplay videos that might be paused but have autoplay attribute
-      const hasAutoplay = video.autoplay && !video.ended;
-      // Check for videos with sufficient metadata that could be played
-      const hasPlayableContent = video.readyState >= 2 && video.duration > 0 && !video.ended;
 
-      const pass = isPlaying || isReadyToPlay || hasAutoplay || hasPlayableContent;
-      console.log(`Video playback filter:`, {
+      console.log(`Video playback filter (PLAYING ONLY):`, {
         isPlaying,
-        isReadyToPlay,
-        hasAutoplay,
-        hasPlayableContent,
-        pass,
         currentTime: video.currentTime,
         paused: video.paused,
         ended: video.ended,
@@ -53,7 +44,7 @@ function hasPlayingVideo() {
         duration: video.duration,
         autoplay: video.autoplay
       });
-      return pass;
+      return isPlaying;
     })
     .sort((v1, v2) => {
       const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
