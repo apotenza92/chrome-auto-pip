@@ -13,14 +13,17 @@ function hasPlayingVideo() {
       ended: video.ended,
       duration: video.duration,
       disablePictureInPicture: video.disablePictureInPicture,
+      autoplay: video.autoplay,
+      muted: video.muted,
       src: video.src || video.currentSrc || 'no src'
     });
   });
 
   const videos = allVideos
     .filter(video => {
-      const pass = video.readyState >= 2;
-      console.log(`Video readyState filter (>=2): ${pass} (readyState: ${video.readyState})`);
+      // More lenient readyState check - allow videos that are still loading metadata
+      const pass = video.readyState >= 1; // HAVE_METADATA or higher
+      console.log(`Video readyState filter (>=1): ${pass} (readyState: ${video.readyState})`);
       return pass;
     })
     .filter(video => {
@@ -31,16 +34,24 @@ function hasPlayingVideo() {
     .filter(video => {
       const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
       const isReadyToPlay = video.readyState >= 3 && !video.ended && video.duration > 0;
-      const pass = isPlaying || isReadyToPlay;
+      // Check for autoplay videos that might be paused but have autoplay attribute
+      const hasAutoplay = video.autoplay && !video.ended;
+      // Check for videos with sufficient metadata that could be played
+      const hasPlayableContent = video.readyState >= 2 && video.duration > 0 && !video.ended;
+
+      const pass = isPlaying || isReadyToPlay || hasAutoplay || hasPlayableContent;
       console.log(`Video playback filter:`, {
         isPlaying,
         isReadyToPlay,
+        hasAutoplay,
+        hasPlayableContent,
         pass,
         currentTime: video.currentTime,
         paused: video.paused,
         ended: video.ended,
         readyState: video.readyState,
-        duration: video.duration
+        duration: video.duration,
+        autoplay: video.autoplay
       });
       return pass;
     })
@@ -51,6 +62,15 @@ function hasPlayingVideo() {
     });
 
   console.log(`Final filtered videos count: ${videos.length}`);
+
+  // Also log some additional page information that might help with debugging
+  console.log("Page info:", {
+    url: window.location.href,
+    title: document.title,
+    readyState: document.readyState,
+    hidden: document.hidden
+  });
+
   console.log("=== VIDEO DETECTION END ===");
 
   if (videos.length === 0) return false;

@@ -8,14 +8,19 @@ function triggerAutoPiP() {
         return false;
     }
 
-    // Find the main video element
+    // Find the main video element with improved detection for autoplay
     const videos = Array.from(document.querySelectorAll('video'))
-        .filter(video => video.readyState >= 2)
+        .filter(video => video.readyState >= 1) // More lenient - allow HAVE_METADATA
         .filter(video => video.disablePictureInPicture == false)
         .filter(video => {
             const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
             const isReadyToPlay = video.readyState >= 3 && !video.ended && video.duration > 0;
-            return isPlaying || isReadyToPlay;
+            // Check for autoplay videos that might be paused but have autoplay attribute
+            const hasAutoplay = video.autoplay && !video.ended;
+            // Check for videos with sufficient metadata that could be played
+            const hasPlayableContent = video.readyState >= 2 && video.duration > 0 && !video.ended;
+
+            return isPlaying || isReadyToPlay || hasAutoplay || hasPlayableContent;
         })
         .sort((v1, v2) => {
             const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
@@ -35,6 +40,7 @@ function triggerAutoPiP() {
     console.log("  ✓ Video found:", video.tagName);
     console.log("  ✓ Video playing:", !video.paused);
     console.log("  ✓ Video audible:", !video.muted && video.volume > 0);
+    console.log("  ✓ Video autoplay:", video.autoplay);
     console.log("  ✓ Video currentTime:", video.currentTime);
     console.log("  ✓ Video duration:", video.duration);
     console.log("  ✓ Video readyState:", video.readyState);
@@ -46,18 +52,43 @@ function triggerAutoPiP() {
         navigator.mediaSession.setActionHandler("enterpictureinpicture", async () => {
             console.log("🚀 Auto-PiP triggered by tab switch!");
 
+            // For autoplay videos, we might need to wait a bit for them to start
+            let videoToUse = video;
+
+            // If the video has autoplay but isn't playing, try to find a playing one or start it
+            if (video.autoplay && video.paused && video.readyState >= 2) {
+                console.log("⏯️ Autoplay video is paused, attempting to start");
+                try {
+                    await video.play();
+                    console.log("✅ Successfully started autoplay video");
+                } catch (playError) {
+                    console.log("⚠️ Could not start autoplay video:", playError.message);
+                    // Try to find another video that's already playing
+                    const playingVideos = Array.from(document.querySelectorAll('video'))
+                        .filter(v => !v.paused && v.currentTime > 0 && !v.ended);
+                    if (playingVideos.length > 0) {
+                        videoToUse = playingVideos[0];
+                        console.log("🔄 Using already playing video instead");
+                    }
+                }
+            }
+
             // Ensure video is playing for PiP
-            if (video.paused && video.readyState >= 3) {
+            if (videoToUse.paused && videoToUse.readyState >= 3) {
                 console.log("▶️ Starting paused video for PiP");
-                await video.play();
+                try {
+                    await videoToUse.play();
+                } catch (playError) {
+                    console.log("⚠️ Could not start video for PiP:", playError.message);
+                }
             }
 
             // Request PiP - this should work without user gesture!
             try {
-                await video.requestPictureInPicture();
-                video.setAttribute('__pip__', true);
-                video.addEventListener('leavepictureinpicture', event => {
-                    video.removeAttribute('__pip__');
+                await videoToUse.requestPictureInPicture();
+                videoToUse.setAttribute('__pip__', true);
+                videoToUse.addEventListener('leavepictureinpicture', event => {
+                    videoToUse.removeAttribute('__pip__');
                     console.log("📺 Left auto-PiP mode");
                 }, { once: true });
                 console.log("✅ Auto-PiP activated successfully!");
@@ -87,14 +118,23 @@ function triggerAutoPiP() {
         navigator.mediaSession.playbackState = video.paused ? 'paused' : 'playing';
 
         // Add playback event listeners to keep MediaSession in sync
-        video.addEventListener('play', () => {
-            navigator.mediaSession.playbackState = 'playing';
-            console.log("📻 MediaSession: playing");
-        });
-        video.addEventListener('pause', () => {
-            navigator.mediaSession.playbackState = 'paused';
-            console.log("📻 MediaSession: paused");
-        });
+        const updatePlaybackState = () => {
+            navigator.mediaSession.playbackState = video.paused ? 'paused' : 'playing';
+            console.log("📻 MediaSession state updated:", video.paused ? 'paused' : 'playing');
+        };
+
+        video.addEventListener('play', updatePlaybackState);
+        video.addEventListener('pause', updatePlaybackState);
+        video.addEventListener('loadedmetadata', updatePlaybackState);
+        video.addEventListener('canplay', updatePlaybackState);
+
+        // For autoplay videos, also listen for when they actually start playing
+        if (video.autoplay) {
+            video.addEventListener('playing', () => {
+                console.log("📻 Autoplay video started playing");
+                updatePlaybackState();
+            });
+        }
 
         console.log("📻 MediaSession metadata and state configured");
         console.log("=== AUTO-PIP SETUP COMPLETE ===");
