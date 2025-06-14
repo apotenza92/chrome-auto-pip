@@ -18,7 +18,20 @@ Includes one click activation of Picture-in-Picture through plugin icon.
 
 2. **Install the extension** 
 
+   **Option A: Chrome Web Store (Recommended)**
+   
    (Link to Chrome Store coming soon)
+   
+   **Option B: Manual Installation from GitHub**
+   
+   1. Click the **Code** button on this GitHub repository
+   2. Select **Download ZIP**
+   3. Extract the downloaded ZIP file to a folder on your computer
+   4. Open your browser and go to `about://extensions`
+   5. Enable **Developer mode** (toggle switch in the top right)
+   6. Click **Load unpacked** button
+   7. Select the extracted folder containing the extension files
+   8. The extension should now appear in your extensions list and toolbar
 
 ## Usage
 
