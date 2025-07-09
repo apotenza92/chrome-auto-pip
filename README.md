@@ -18,7 +18,7 @@ Includes one click activation of Picture-in-Picture through plugin icon.
 
    **Option A: Chrome Web Store (Recommended)**
    
-   (Link to Chrome Store coming soon)
+   [Chrome Web Store](https://chromewebstore.google.com/detail/automatic-picture-in-pict/dmjccoaplbldlhhljlcldhaciadfhkcj)
    
    **Option B: Manual Installation from GitHub**
    
