@@ -148,6 +148,7 @@ if (typeof chrome !== 'undefined' && chrome.action) {
     console.log("Extension icon clicked, attempting to activate PiP on tab:", tab.id);
     console.log("Current pipActiveTab:", pipActiveTab);
     console.log("Current targetTab:", targetTab);
+    console.log("Auto-PiP enabled:", autoPipEnabled);
 
     if (isRestrictedUrl(tab.url)) {
       console.log("Cannot activate PiP on restricted URL:", tab.url);
@@ -166,7 +167,8 @@ if (typeof chrome !== 'undefined' && chrome.action) {
       return;
     }
 
-    // Try immediate PiP on current tab (works with both playing and paused videos)
+    // STEP 1: Try immediate PiP on current tab (works with both playing and paused videos)
+    // This always happens regardless of auto-PiP setting - manual activation should always work
     safeExecuteScript(tab.id, ['./scripts/immediate-pip.js'], (pipResults) => {
       if (pipResults && pipResults[0]) {
         const result = pipResults[0].result;
@@ -184,17 +186,23 @@ if (typeof chrome !== 'undefined' && chrome.action) {
       }
     });
 
-    // Separately, try to setup auto-PiP for future tab switches (only if playing videos exist)
-    safeExecuteScript(tab.id, ['./scripts/trigger-auto-pip.js'], (results) => {
-      if (results && results[0] && results[0].result) {
-        console.log("MediaSession setup result:", results[0].result);
-        // Set this as the target tab for future auto-switching
-        targetTab = tab.id;
-        console.log("Set targetTab to:", targetTab);
-      } else {
-        console.log("MediaSession setup failed or returned false (no playing videos for auto-PiP)");
-      }
-    });
+    // STEP 2: Only setup auto-PiP for future tab switches if auto-PiP is enabled
+    // This prevents manual activation from re-enabling auto-PiP when it's disabled
+    if (autoPipEnabled) {
+      console.log("Auto-PiP enabled - setting up MediaSession handlers for future tab switches");
+      safeExecuteScript(tab.id, ['./scripts/trigger-auto-pip.js'], (results) => {
+        if (results && results[0] && results[0].result) {
+          console.log("MediaSession setup result:", results[0].result);
+          // Set this as the target tab for future auto-switching
+          targetTab = tab.id;
+          console.log("Set targetTab to:", targetTab);
+        } else {
+          console.log("MediaSession setup failed or returned false (no playing videos for auto-PiP)");
+        }
+      });
+    } else {
+      console.log("Auto-PiP disabled - skipping MediaSession setup for manual activation");
+    }
   });
 }
 
