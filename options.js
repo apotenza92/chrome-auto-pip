@@ -17,20 +17,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Save setting when changed
     autoPipToggle.addEventListener('change', async () => {
         try {
+            const isEnabled = autoPipToggle.checked;
+            
             await chrome.storage.sync.set({
-                autoPipEnabled: autoPipToggle.checked
+                autoPipEnabled: isEnabled
             });
 
-            console.log('Saved auto-PiP setting:', autoPipToggle.checked);
+            console.log('Saved auto-PiP setting:', isEnabled);
 
-            // Show status message
             status.classList.add('show');
             setTimeout(() => {
                 status.classList.remove('show');
-            }, 2000);
+            }, 3000);
 
         } catch (error) {
             console.error('Error saving settings:', error);
+            status.textContent = 'Error saving settings. Please try again.';
+            status.style.color = '#ef4444';
+            status.classList.add('show');
+            setTimeout(() => {
+                status.classList.remove('show');
+            }, 3000);
         }
     });
 }); 

@@ -49,34 +49,64 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     autoPipEnabled = newValue;
     console.log('Auto-PiP setting changed from', oldValue, 'to', newValue);
 
-    // If auto-PiP was disabled, clear any existing targetTab and pipActiveTab
+    // If auto-PiP was disabled, clear MediaSession handlers on ALL tabs
     if (!newValue) {
-      console.log('Auto-PiP disabled - clearing targetTab and pipActiveTab');
+      console.log('Auto-PiP disabled - clearing MediaSession handlers on all tabs');
       console.log('Current targetTab:', targetTab);
       console.log('Current pipActiveTab:', pipActiveTab);
 
-      // Clear MediaSession handlers on both target and pip active tabs
-      const tabsToClear = [];
-      if (targetTab) tabsToClear.push(targetTab);
-      if (pipActiveTab && pipActiveTab !== targetTab) tabsToClear.push(pipActiveTab);
-
-      if (tabsToClear.length > 0) {
-        console.log('Clearing MediaSession handlers on tabs:', tabsToClear);
-        tabsToClear.forEach(tabId => {
-          safeExecuteScript(tabId, ['./scripts/clear-auto-pip.js'], (results) => {
-            if (results && results[0]) {
-              console.log(`MediaSession handlers cleared on tab ${tabId}:`, results[0].result);
-            } else {
-              console.log(`Failed to clear MediaSession handlers on tab ${tabId}`);
-            }
-          });
+      // Clear MediaSession handlers on ALL tabs to ensure complete cleanup
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          // Skip restricted URLs
+          if (isRestrictedUrl(tab.url)) return;
+          
+                     console.log(`Clearing MediaSession handlers on tab ${tab.id}: ${tab.url}`);
+           safeExecuteScript(tab.id, ['./scripts/clear-auto-pip.js'], (results) => {
+             if (results && results[0] && results[0].result) {
+               const result = results[0].result;
+               if (result.success) {
+                 console.log(`✅ MediaSession handlers cleared on tab ${tab.id}: ${result.reason}`);
+               } else {
+                 console.log(`❌ Failed to clear MediaSession handlers on tab ${tab.id}: ${result.reason}`);
+               }
+             } else {
+               console.log(`❌ Failed to execute clear script on tab ${tab.id}`);
+             }
+           });
         });
-      } else {
-        console.log('No tabs to clear MediaSession handlers from');
-      }
+      });
 
       targetTab = null;
       pipActiveTab = null;
+    } else if (newValue && oldValue === false) {
+      // If auto-PiP was re-enabled, check the current tab for videos
+      console.log('Auto-PiP re-enabled - checking current tab for videos');
+      
+      // Get the current active tab
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs.length > 0) {
+          const activeTab = tabs[0];
+          if (activeTab.url && !isRestrictedUrl(activeTab.url)) {
+            safeExecuteScript(activeTab.id, ['./scripts/check-video.js'], (results) => {
+              const hasVideo = results && results[0] && results[0].result;
+              console.log("Current tab has video:", hasVideo);
+              if (hasVideo) {
+                targetTab = activeTab.id;
+                currentTab = activeTab.id;
+                console.log("Set targetTab for current tab:", targetTab);
+
+                // Setup MediaSession auto-PiP on the current tab
+                safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
+                  if (autoResults && autoResults[0]) {
+                    console.log("Auto-PiP re-enabled setup result:", autoResults[0].result);
+                  }
+                });
+              }
+            });
+          }
+        }
+      });
     }
   }
 });
