@@ -11,7 +11,6 @@ function triggerAutoPiP() {
     // Find actively playing videos for automatic PiP
     const videos = Array.from(document.querySelectorAll('video'))
         .filter(video => video.readyState >= 1) // More lenient - allow HAVE_METADATA
-        .filter(video => video.disablePictureInPicture == false)
         .filter(video => {
             // ONLY playing videos for automatic PiP
             const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
@@ -27,6 +26,7 @@ function triggerAutoPiP() {
         console.log("❌ No playing videos found for auto-PiP");
         return false;
     }
+    console.log(`${videos.length} playing videos found for auto-PiP`);
 
     const video = videos[0];
 
@@ -55,7 +55,7 @@ function triggerAutoPiP() {
 
             // Look for currently playing videos (in case the original stopped)
             const currentlyPlayingVideos = Array.from(document.querySelectorAll('video'))
-                .filter(v => !v.paused && v.currentTime > 0 && !v.ended && !v.disablePictureInPicture);
+                .filter(v => !v.paused && v.currentTime > 0 && !v.ended);
 
             if (currentlyPlayingVideos.length === 0) {
                 console.log("❌ No playing videos found at tab switch - aborting auto-PiP");
@@ -67,6 +67,9 @@ function triggerAutoPiP() {
             // Request PiP - only for playing videos!
             try {
                 console.log("📺 Requesting PiP for playing video");
+                if(videoToUse.hasAttribute("disablePictureInPicture")) {
+                    videoToUse.removeAttribute("disablePictureInPicture");
+                }
                 await videoToUse.requestPictureInPicture();
                 videoToUse.setAttribute('__pip__', true);
                 videoToUse.addEventListener('leavepictureinpicture', event => {

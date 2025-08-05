@@ -27,11 +27,6 @@ function hasPlayingVideo() {
       return pass;
     })
     .filter(video => {
-      const pass = video.disablePictureInPicture == false;
-      console.log(`Video PiP enabled filter: ${pass} (disablePictureInPicture: ${video.disablePictureInPicture})`);
-      return pass;
-    })
-    .filter(video => {
       // ONLY consider videos that are actively playing for automatic PiP
       const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
 

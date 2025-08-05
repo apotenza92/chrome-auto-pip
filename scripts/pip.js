@@ -24,11 +24,6 @@ function getVideos() {
       return pass;
     })
     .filter(video => {
-      const pass = video.disablePictureInPicture == false;
-      console.log(`Video PiP enabled filter: ${pass} (disablePictureInPicture: ${video.disablePictureInPicture})`);
-      return pass;
-    })
-    .filter(video => {
       const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
       const isReadyToPlay = video.readyState >= 3 && !video.ended && video.duration > 0;
       const pass = isPlaying || isReadyToPlay;
@@ -159,7 +154,7 @@ function setupAutoPiPSupport() {
   console.log("getVideos() result:", video);
 
   if (!video) {
-    console.log("No video found, returning false");
+    console.log("No video found on page, returning false");
     return false;
   }
 

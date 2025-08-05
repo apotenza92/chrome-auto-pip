@@ -63,12 +63,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           
                      console.log(`Clearing MediaSession handlers on tab ${tab.id}: ${tab.url}`);
            safeExecuteScript(tab.id, ['./scripts/clear-auto-pip.js'], (results) => {
-             if (results && results[0] && results[0].result) {
-               const result = results[0].result;
-               if (result.success) {
-                 console.log(`✅ MediaSession handlers cleared on tab ${tab.id}: ${result.reason}`);
+             if (results && results.length > 0) {
+               if (results.some(frameResult => {frameResult.success})) {
+                 console.log(`✅ MediaSession handlers cleared on tab ${tab.id}`);
                } else {
-                 console.log(`❌ Failed to clear MediaSession handlers on tab ${tab.id}: ${result.reason}`);
+                 console.log(`❌ Failed to clear MediaSession handlers on tab ${tab.id}: ${results[0].reason}`);
                }
              } else {
                console.log(`❌ Failed to execute clear script on tab ${tab.id}`);
@@ -89,7 +88,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           const activeTab = tabs[0];
           if (activeTab.url && !isRestrictedUrl(activeTab.url)) {
             safeExecuteScript(activeTab.id, ['./scripts/check-video.js'], (results) => {
-              const hasVideo = results && results[0] && results[0].result;
+              const hasVideo = results?.some(frameResult => frameResult && frameResult.result);
               console.log("Current tab has video:", hasVideo);
               if (hasVideo) {
                 targetTab = activeTab.id;
@@ -98,7 +97,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
                 // Setup MediaSession auto-PiP on the current tab
                 safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-                  if (autoResults && autoResults[0]) {
+                  if (autoResults?.some(frameResult => frameResult && frameResult.result)) {
                     console.log("Auto-PiP re-enabled setup result:", autoResults[0].result);
                   }
                 });
@@ -128,7 +127,7 @@ function safeExecuteScript(tabId, files, callback) {
     }
 
     chrome.scripting.executeScript({
-      target: { tabId: tabId },
+      target: { tabId: tabId, allFrames: true },
       files: files
     }, (results) => {
       if (chrome.runtime.lastError) {
@@ -159,8 +158,9 @@ if (typeof chrome !== 'undefined' && chrome.action) {
     if (pipActiveTab && pipActiveTab !== tab.id) {
       console.log("PiP is active on tab", pipActiveTab, "- deactivating it first");
       safeExecuteScript(pipActiveTab, ['./scripts/pip.js'], (results) => {
-        if (results && results[0]) {
-          console.log("Cross-tab PiP deactivation result:", results[0].result);
+        const result = results?.some(frameResult => frameResult && frameResult.result)
+        if (result) {
+          console.log("Cross-tab PiP deactivation result:", result);
         }
         pipActiveTab = null;
       });
@@ -170,8 +170,8 @@ if (typeof chrome !== 'undefined' && chrome.action) {
     // STEP 1: Try immediate PiP on current tab (works with both playing and paused videos)
     // This always happens regardless of auto-PiP setting - manual activation should always work
     safeExecuteScript(tab.id, ['./scripts/immediate-pip.js'], (pipResults) => {
-      if (pipResults && pipResults[0]) {
-        const result = pipResults[0].result;
+      const result = pipResults?.some(frameResult => frameResult && frameResult.result)
+      if (result) {
         console.log("Immediate PiP activation result:", result);
 
         if (result === true) {
@@ -191,8 +191,9 @@ if (typeof chrome !== 'undefined' && chrome.action) {
     if (autoPipEnabled) {
       console.log("Auto-PiP enabled - setting up MediaSession handlers for future tab switches");
       safeExecuteScript(tab.id, ['./scripts/trigger-auto-pip.js'], (results) => {
-        if (results && results[0] && results[0].result) {
-          console.log("MediaSession setup result:", results[0].result);
+        const result = results?.some(frameResult => frameResult && frameResult.result)
+        if (result) {
+          console.log("MediaSession setup result:", result);
           // Set this as the target tab for future auto-switching
           targetTab = tab.id;
           console.log("Set targetTab to:", targetTab);
@@ -222,7 +223,7 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
     if (targetTab === null && autoPipEnabled) {
       console.log(">> [1] Check PiP For:", currentTab, "(auto-PiP enabled)")
       safeExecuteScript(currentTab, ['./scripts/check-video.js'], (results) => {
-        const hasVideo = results && results[0] && results[0].result;
+        const hasVideo = results?.some(frameResult => frameResult && frameResult.result);
         console.log("Has Video:", hasVideo);
         if (hasVideo) {
           targetTab = currentTab;
@@ -230,8 +231,9 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
 
           // Setup MediaSession auto-PiP on the video tab
           safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-            if (autoResults && autoResults[0]) {
-              console.log("Auto-PiP setup result:", autoResults[0].result);
+            const autoResult = autoResults?.some(frameResult => frameResult && frameResult.result)
+            if (autoResult) {
+              console.log("Auto-PiP setup result:", autoResult);
             }
           });
         }
@@ -263,15 +265,16 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
 
         // If page has a playing video, set it as new targetTab and setup auto-PiP
         safeExecuteScript(currentTab, ['./scripts/check-video.js'], (results) => {
-          const hasVideo = results && results[0] && results[0].result;
+          const hasVideo = results?.some(frameResult => frameResult && frameResult.result);
           console.log("Has Video:", hasVideo);
           if (hasVideo) {
             targetTab = currentTab;
 
             // Setup MediaSession auto-PiP on the video tab
             safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-              if (autoResults && autoResults[0]) {
-                console.log("Auto-PiP setup result:", autoResults[0].result);
+              const autoResult = autoResults?.some(frameResult => frameResult && frameResult.result);
+              if (autoResult) {
+                console.log("Auto-PiP setup result:", autoResult);
               }
             });
           }
@@ -322,7 +325,7 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
         console.log("Checking for autoplay videos on newly loaded page (auto-PiP enabled)");
         setTimeout(() => {
           safeExecuteScript(tabId, ['./scripts/check-video.js'], (results) => {
-            const hasVideo = results && results[0] && results[0].result;
+            const hasVideo = results?.some(frameResult => frameResult && frameResult.result);
             console.log("Autoplay video check result:", hasVideo);
             if (hasVideo) {
               targetTab = tabId;
@@ -330,8 +333,9 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
 
               // Setup MediaSession auto-PiP on the video tab
               safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-                if (autoResults && autoResults[0]) {
-                  console.log("Auto-PiP setup for autoplay result:", autoResults[0].result);
+                const autoResult = autoResults?.some(frameResult => frameResult && frameResult.result);
+                if (autoResult) {
+                  console.log("Auto-PiP setup for autoplay result:", autoResult);
                 }
               });
             }
