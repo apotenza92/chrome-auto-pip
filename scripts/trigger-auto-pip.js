@@ -1,88 +1,61 @@
 // Function to trigger automatic PiP via MediaSession API (Chrome 134+)
 function triggerAutoPiP() {
-    console.log("=== AUTO-PIP ATTEMPT START ===");
+
 
     // Check if MediaSession API is supported
     if (!('mediaSession' in navigator)) {
-        console.log("❌ MediaSession API not supported");
+
         return false;
     }
 
-    // Find actively playing videos for automatic PiP
-    const videos = Array.from(document.querySelectorAll('video'))
-        .filter(video => video.readyState >= 1) // More lenient - allow HAVE_METADATA
-        .filter(video => video.disablePictureInPicture == false)
-        .filter(video => {
-            // ONLY playing videos for automatic PiP
-            const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
-            return isPlaying;
-        })
-        .sort((v1, v2) => {
-            const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
-            const v2Rect = v2.getClientRects()[0] || { width: 0, height: 0 };
-            return ((v2Rect.width * v2Rect.height) - (v1Rect.width * v1Rect.height));
-        });
+    // Avoid double-registering listeners on reinjection
+    if (window.__auto_pip_registered__) {
 
-    if (videos.length === 0) {
-        console.log("❌ No playing videos found for auto-PiP");
-        return false;
+        return true;
     }
+    window.__auto_pip_registered__ = true;
 
-    const video = videos[0];
+    // Helper: find currently playing videos (best-first)
+    const findCurrentlyPlayingVideos = () => {
+        return Array.from(document.querySelectorAll('video'))
+            .filter(video => video.disablePictureInPicture == false)
+            .filter(video => video.currentTime > 0 && !video.paused && !video.ended)
+            .sort((v1, v2) => {
+                const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
+                const v2Rect = v2.getClientRects()[0] || { width: 0, height: 0 };
+                return ((v2Rect.width * v2Rect.height) - (v1Rect.width * v1Rect.height));
+            });
+    };
 
-    // Log Chrome's auto-PiP eligibility requirements
-    console.log("📊 Auto-PiP Eligibility Check:");
-    console.log("  ✓ Video found:", video.tagName);
-    console.log("  ✓ Video playing:", !video.paused);
-    console.log("  ✓ Video audible:", !video.muted && video.volume > 0);
-    console.log("  ✓ Video autoplay:", video.autoplay);
-    console.log("  ✓ Video currentTime:", video.currentTime);
-    console.log("  ✓ Video duration:", video.duration);
-    console.log("  ✓ Video readyState:", video.readyState);
-    console.log("  ✓ Page visible:", !document.hidden);
-    console.log("  ✓ Top frame:", window === window.top);
-
+    // Register MediaSession action handler for automatic PiP regardless of current playback state
     try {
-        // Register MediaSession action handler for automatic PiP
         navigator.mediaSession.setActionHandler("enterpictureinpicture", async () => {
-            console.log("🚀 Auto-PiP triggered by tab switch!");
 
-            // Double-check that the video is still playing before activating PiP
-            if (video.paused || video.ended) {
-                console.log("❌ Video is paused or ended - aborting auto-PiP");
-                return;
-            }
 
-            // Look for currently playing videos (in case the original stopped)
-            const currentlyPlayingVideos = Array.from(document.querySelectorAll('video'))
-                .filter(v => !v.paused && v.currentTime > 0 && !v.ended && !v.disablePictureInPicture);
-
+            const currentlyPlayingVideos = findCurrentlyPlayingVideos();
             if (currentlyPlayingVideos.length === 0) {
-                console.log("❌ No playing videos found at tab switch - aborting auto-PiP");
+
                 return;
             }
 
             const videoToUse = currentlyPlayingVideos[0];
-
-            // Request PiP - only for playing videos!
             try {
-                console.log("📺 Requesting PiP for playing video");
+
                 await videoToUse.requestPictureInPicture();
                 videoToUse.setAttribute('__pip__', true);
                 videoToUse.addEventListener('leavepictureinpicture', event => {
                     videoToUse.removeAttribute('__pip__');
-                    console.log("📺 Left auto-PiP mode");
+
                 }, { once: true });
-                console.log("✅ Auto-PiP activated successfully!");
+
             } catch (pipError) {
-                console.error("❌ Auto-PiP request failed:", pipError);
-                throw pipError;
+
             }
         });
 
-        console.log("✅ MediaSession auto-PiP handler registered");
 
-        // Set comprehensive media metadata to help Chrome recognize this as a media session
+
+        // Provide baseline metadata so the page is recognized as a media session early
         navigator.mediaSession.metadata = new MediaMetadata({
             title: document.title || 'Video Content',
             artist: window.location.hostname,
@@ -96,33 +69,44 @@ function triggerAutoPiP() {
             ]
         });
 
-        // Set additional MediaSession playback state to help with eligibility
-        navigator.mediaSession.playbackState = video.paused ? 'paused' : 'playing';
+        // Keep playbackState loosely in sync across any videos on the page
+        const updatePlaybackStateFromAnyVideo = () => {
+            const playing = findCurrentlyPlayingVideos();
+            const state = playing.length > 0 ? 'playing' : 'paused';
+            navigator.mediaSession.playbackState = state;
 
-        // Add playback event listeners to keep MediaSession in sync
-        const updatePlaybackState = () => {
-            navigator.mediaSession.playbackState = video.paused ? 'paused' : 'playing';
-            console.log("📻 MediaSession state updated:", video.paused ? 'paused' : 'playing');
+
+            // Notify background once when playback starts so it can set targetTab immediately
+            if (state === 'playing') {
+                try {
+                    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                        chrome.runtime.sendMessage({ type: 'auto_pip_video_playing' });
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
         };
 
-        video.addEventListener('play', updatePlaybackState);
-        video.addEventListener('pause', updatePlaybackState);
-        video.addEventListener('loadedmetadata', updatePlaybackState);
-        video.addEventListener('canplay', updatePlaybackState);
+        // Listen for play/pause events bubbling from any video
+        document.addEventListener('play', (e) => {
+            if (e.target && e.target.tagName === 'VIDEO') updatePlaybackStateFromAnyVideo();
+        }, true);
+        document.addEventListener('pause', (e) => {
+            if (e.target && e.target.tagName === 'VIDEO') updatePlaybackStateFromAnyVideo();
+        }, true);
+        document.addEventListener('loadedmetadata', (e) => {
+            if (e.target && e.target.tagName === 'VIDEO') updatePlaybackStateFromAnyVideo();
+        }, true);
 
-        // For autoplay videos, also listen for when they actually start playing
-        if (video.autoplay) {
-            video.addEventListener('playing', () => {
-                console.log("📻 Autoplay video started playing");
-                updatePlaybackState();
-            });
-        }
+        // Initial state
+        updatePlaybackStateFromAnyVideo();
 
-        console.log("📻 MediaSession metadata and state configured");
-        console.log("=== AUTO-PIP SETUP COMPLETE ===");
+
+
         return true;
     } catch (error) {
-        console.error("❌ MediaSession setup failed:", error);
+
         return false;
     }
 }
