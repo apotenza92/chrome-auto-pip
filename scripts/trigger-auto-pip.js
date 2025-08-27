@@ -1,16 +1,12 @@
 // Function to trigger automatic PiP via MediaSession API (Chrome 134+)
 function triggerAutoPiP() {
-
-
     // Check if MediaSession API is supported
     if (!('mediaSession' in navigator)) {
-
         return false;
     }
 
     // Avoid double-registering listeners on reinjection
     if (window.__auto_pip_registered__) {
-
         return true;
     }
     window.__auto_pip_registered__ = true;
@@ -18,7 +14,6 @@ function triggerAutoPiP() {
     // Helper: find currently playing videos (best-first)
     const findCurrentlyPlayingVideos = () => {
         return Array.from(document.querySelectorAll('video'))
-            .filter(video => video.disablePictureInPicture == false)
             .filter(video => video.currentTime > 0 && !video.paused && !video.ended)
             .sort((v1, v2) => {
                 const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
@@ -30,17 +25,16 @@ function triggerAutoPiP() {
     // Register MediaSession action handler for automatic PiP regardless of current playback state
     try {
         navigator.mediaSession.setActionHandler("enterpictureinpicture", async () => {
-
-
             const currentlyPlayingVideos = findCurrentlyPlayingVideos();
             if (currentlyPlayingVideos.length === 0) {
-
                 return;
             }
 
             const videoToUse = currentlyPlayingVideos[0];
             try {
-
+                if(videoToUse.hasAttribute("disablePictureInPicture")) {
+                    videoToUse.removeAttribute("disablePictureInPicture");
+                }
                 await videoToUse.requestPictureInPicture();
                 videoToUse.setAttribute('__pip__', true);
                 videoToUse.addEventListener('leavepictureinpicture', event => {
@@ -49,11 +43,9 @@ function triggerAutoPiP() {
                 }, { once: true });
 
             } catch (pipError) {
-
+                // TODO: Handle PiP request errors: Maybe Log?
             }
         });
-
-
 
         // Provide baseline metadata so the page is recognized as a media session early
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -74,7 +66,6 @@ function triggerAutoPiP() {
             const playing = findCurrentlyPlayingVideos();
             const state = playing.length > 0 ? 'playing' : 'paused';
             navigator.mediaSession.playbackState = state;
-
 
             // Notify background once when playback starts so it can set targetTab immediately
             if (state === 'playing') {
@@ -101,12 +92,8 @@ function triggerAutoPiP() {
 
         // Initial state
         updatePlaybackStateFromAnyVideo();
-
-
-
         return true;
     } catch (error) {
-
         return false;
     }
 }
