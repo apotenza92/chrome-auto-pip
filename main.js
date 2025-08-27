@@ -31,8 +31,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     try {
       await chrome.storage.sync.set({ autoPipEnabled: true });
       autoPipEnabled = true;
-    } catch (error) {
-    }
+    } catch (error) { }
   }
 });
 
@@ -45,25 +44,23 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
     // If auto-PiP was disabled, clear MediaSession handlers on ALL tabs
     if (!newValue) {
-
       // Clear MediaSession handlers on ALL tabs to ensure complete cleanup
       chrome.tabs.query({}, (tabs) => {
         tabs.forEach(tab => {
           // Skip restricted URLs
           if (isRestrictedUrl(tab.url)) return;
-          
-                     console.log(`Clearing MediaSession handlers on tab ${tab.id}: ${tab.url}`);
-           safeExecuteScript(tab.id, ['./scripts/clear-auto-pip.js'], (results) => {
-             if (results && results.length > 0) {
-               if (results.some(frameResult => {frameResult.success})) {
-                 console.log(`✅ MediaSession handlers cleared on tab ${tab.id}`);
-               } else {
-                 console.log(`❌ Failed to clear MediaSession handlers on tab ${tab.id}: ${results[0].reason}`);
-               }
-             } else {
-               console.log(`❌ Failed to execute clear script on tab ${tab.id}`);
-             }
-           });
+          console.log(`Clearing MediaSession handlers on tab ${tab.id}: ${tab.url}`);
+          safeExecuteScript(tab.id, ['./scripts/clear-auto-pip.js'], (results) => {
+            if (results && results.length > 0) {
+              if (results.some(frameResult => { frameResult.success })) {
+                console.log(`✅ MediaSession handlers cleared on tab ${tab.id}`);
+              } else {
+                console.log(`❌ Failed to clear MediaSession handlers on tab ${tab.id}: ${results[0].reason}`);
+              }
+            } else {
+              console.log(`❌ Failed to execute clear script on tab ${tab.id}`);
+            }
+          });
         });
       });
 
@@ -130,7 +127,6 @@ function safeExecuteScript(tabId, files, callback) {
 if (typeof chrome !== 'undefined' && chrome.action) {
   // Handle extension icon click to manually activate PiP
   chrome.action.onClicked.addListener(async (tab) => {
-
     if (isRestrictedUrl(tab.url)) {
       return;
     }
@@ -153,7 +149,6 @@ if (typeof chrome !== 'undefined' && chrome.action) {
       const result = pipResults?.some(frameResult => frameResult && frameResult.result)
       if (result) {
         console.log("Immediate PiP activation result:", result);
-
         if (result === true) {
           // PiP was activated
           pipActiveTab = tab.id;
@@ -172,10 +167,8 @@ if (typeof chrome !== 'undefined' && chrome.action) {
         if (result) {
           // Set this as the target tab for future auto-switching
           targetTab = tab.id;
-        } else {
         }
       });
-    } else {
     }
   });
 }
@@ -183,9 +176,7 @@ if (typeof chrome !== 'undefined' && chrome.action) {
 // Handle tab activation
 if (typeof chrome !== 'undefined' && chrome.tabs) {
   chrome.tabs.onActivated.addListener(function (tab) {
-
     currentTab = tab.tabId;
-
 
     // --- [1] : Check for playing videos *(set target)  ---
     if (targetTab === null && autoPipEnabled) {
@@ -194,7 +185,6 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
         console.log("Has Video:", hasVideo);
         if (hasVideo) {
           targetTab = currentTab;
-
           // Setup MediaSession auto-PiP on the video tab
           safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
             const autoResult = autoResults?.some(frameResult => frameResult && frameResult.result)
@@ -233,11 +223,7 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
             targetTab = currentTab;
 
             // Setup MediaSession auto-PiP on the video tab
-            safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-              const autoResult = autoResults?.some(frameResult => frameResult && frameResult.result);
-              if (autoResult) {
-              }
-            });
+            safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => { });
           }
         });
 
@@ -252,9 +238,7 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
         // Track that PiP should be active on the target tab
         pipActiveTab = targetTab;
         // No manual action needed - MediaSession API handles this automatically
-      } else if (!autoPipEnabled) {
       }
-
 
       // --- [ Update ] ---
       prevTab = tab.tabId;
@@ -265,10 +249,7 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
   chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     // Inject MediaSession setup as early as possible on active tabs while loading
     if (changeInfo.status === 'loading' && tab && tab.active && tab.url && !isRestrictedUrl(tab.url) && autoPipEnabled) {
-      safeExecuteScript(tabId, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-        if (autoResults && autoResults[0]) {
-        }
-      });
+      safeExecuteScript(tabId, ['./scripts/trigger-auto-pip.js'], (autoResults) => { });
     }
 
     // Only process when the page has finished loading
@@ -284,15 +265,10 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
               targetTab = tabId;
 
               // Setup MediaSession auto-PiP on the video tab
-              safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-                const autoResult = autoResults?.some(frameResult => frameResult && frameResult.result);
-                if (autoResult) {
-                }
-              });
+              safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => { });
             }
           });
         }, 2000); // Wait 2 seconds for autoplay to start
-      } else if (tabId === currentTab && targetTab === null && !autoPipEnabled) {
       }
     }
   });
@@ -309,18 +285,12 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
             targetTab = senderTabId;
 
             // Ensure MediaSession auto-PiP is registered (idempotent)
-            safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-              if (autoResults && autoResults[0]) {
-              }
-            });
+            safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => { });
           }
         }
       }
     } catch (e) {
+      // TODO: Handle errors
     }
   });
-} else {
-}
-
-if (!chrome.action) {
 }

@@ -1,44 +1,19 @@
 // Function to trigger automatic PiP via MediaSession API (Chrome 134+)
 function triggerAutoPiP() {
-
-
     // Check if MediaSession API is supported
     if (!('mediaSession' in navigator)) {
-
         return false;
     }
 
-<<<<<<< HEAD
-    // Find actively playing videos for automatic PiP
-    const videos = Array.from(document.querySelectorAll('video'))
-        .filter(video => video.readyState >= 1) // More lenient - allow HAVE_METADATA
-        .filter(video => {
-            // ONLY playing videos for automatic PiP
-            const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
-            return isPlaying;
-        })
-        .sort((v1, v2) => {
-            const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
-            const v2Rect = v2.getClientRects()[0] || { width: 0, height: 0 };
-            return ((v2Rect.width * v2Rect.height) - (v1Rect.width * v1Rect.height));
-        });
-=======
     // Avoid double-registering listeners on reinjection
     if (window.__auto_pip_registered__) {
->>>>>>> 110258d2fe1bf70f96f11ff02e131be8e9953b14
-
         return true;
     }
-<<<<<<< HEAD
-    console.log(`${videos.length} playing videos found for auto-PiP`);
-=======
     window.__auto_pip_registered__ = true;
->>>>>>> 110258d2fe1bf70f96f11ff02e131be8e9953b14
 
     // Helper: find currently playing videos (best-first)
     const findCurrentlyPlayingVideos = () => {
         return Array.from(document.querySelectorAll('video'))
-            .filter(video => video.disablePictureInPicture == false)
             .filter(video => video.currentTime > 0 && !video.paused && !video.ended)
             .sort((v1, v2) => {
                 const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
@@ -50,36 +25,16 @@ function triggerAutoPiP() {
     // Register MediaSession action handler for automatic PiP regardless of current playback state
     try {
         navigator.mediaSession.setActionHandler("enterpictureinpicture", async () => {
-
-<<<<<<< HEAD
-            // Double-check that the video is still playing before activating PiP
-            if (video.paused || video.ended) {
-                console.log("❌ Video is paused or ended - aborting auto-PiP");
-                return;
-            }
-
-            // Look for currently playing videos (in case the original stopped)
-            const currentlyPlayingVideos = Array.from(document.querySelectorAll('video'))
-                .filter(v => !v.paused && v.currentTime > 0 && !v.ended);
-=======
->>>>>>> 110258d2fe1bf70f96f11ff02e131be8e9953b14
-
             const currentlyPlayingVideos = findCurrentlyPlayingVideos();
             if (currentlyPlayingVideos.length === 0) {
-
                 return;
             }
 
             const videoToUse = currentlyPlayingVideos[0];
             try {
-<<<<<<< HEAD
-                console.log("📺 Requesting PiP for playing video");
                 if(videoToUse.hasAttribute("disablePictureInPicture")) {
                     videoToUse.removeAttribute("disablePictureInPicture");
                 }
-=======
-
->>>>>>> 110258d2fe1bf70f96f11ff02e131be8e9953b14
                 await videoToUse.requestPictureInPicture();
                 videoToUse.setAttribute('__pip__', true);
                 videoToUse.addEventListener('leavepictureinpicture', event => {
@@ -88,11 +43,9 @@ function triggerAutoPiP() {
                 }, { once: true });
 
             } catch (pipError) {
-
+                // TODO: Handle PiP request errors: Maybe Log?
             }
         });
-
-
 
         // Provide baseline metadata so the page is recognized as a media session early
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -113,7 +66,6 @@ function triggerAutoPiP() {
             const playing = findCurrentlyPlayingVideos();
             const state = playing.length > 0 ? 'playing' : 'paused';
             navigator.mediaSession.playbackState = state;
-
 
             // Notify background once when playback starts so it can set targetTab immediately
             if (state === 'playing') {
@@ -140,12 +92,8 @@ function triggerAutoPiP() {
 
         // Initial state
         updatePlaybackStateFromAnyVideo();
-
-
-
         return true;
     } catch (error) {
-
         return false;
     }
 }
