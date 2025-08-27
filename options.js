@@ -8,9 +8,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const result = await chrome.storage.sync.get(['autoPipEnabled']);
         // Default to enabled if not set
         autoPipToggle.checked = result.autoPipEnabled !== false;
-        console.log('Loaded auto-PiP setting:', autoPipToggle.checked);
+
     } catch (error) {
-        console.error('Error loading settings:', error);
+
         autoPipToggle.checked = true; // Default to enabled
     }
 
@@ -18,12 +18,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     autoPipToggle.addEventListener('change', async () => {
         try {
             const isEnabled = autoPipToggle.checked;
-            
+
             await chrome.storage.sync.set({
                 autoPipEnabled: isEnabled
             });
 
-            console.log('Saved auto-PiP setting:', isEnabled);
+
 
             status.classList.add('show');
             setTimeout(() => {
@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }, 3000);
 
         } catch (error) {
-            console.error('Error saving settings:', error);
+
             status.textContent = 'Error saving settings. Please try again.';
             status.style.color = '#ef4444';
             status.classList.add('show');

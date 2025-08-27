@@ -1,34 +1,25 @@
 // Function to immediately request PiP when icon is clicked
-async function immediatelyRequestPiP() {
-    console.log("=== IMMEDIATE PIP REQUEST ===");
-
-    // Check if PiP is active on current tab
+(async () => {
+    // If PiP already active on this tab, exit it
     if (document.pictureInPictureElement) {
-        console.log("🔄 PiP is active on current tab - exiting PiP");
         try {
-            document.exitPictureInPicture();
-            console.log("✅ PiP deactivated successfully!");
+            await document.exitPictureInPicture();
             return "toggled_off";
-        } catch (error) {
-            console.error("❌ PiP exit failed:", error);
+        } catch (e) {
             return false;
         }
     }
 
-    // Also check for local PiP markers on current tab
+    // Also clear local PiP marker if present
     const pipVideo = document.querySelector('[__pip__]');
     if (pipVideo) {
-        console.log("🔄 Local video marked as PiP - cleaning up");
         pipVideo.removeAttribute('__pip__');
-        console.log("✅ Local PiP marker removed!");
         return "toggled_off";
     }
 
-    // No PiP active on current tab, proceed with activation
-    console.log("🎯 No PiP detected on current tab, proceeding with activation");
-
-    // Find any video that can support PiP (both playing and paused for manual activation)
+    // Find a suitable video (manual: allow playing or paused with content)
     const videos = Array.from(document.querySelectorAll('video'))
+<<<<<<< HEAD
         .filter(video => video.readyState >= 2)
         .filter(video => {
             // For manual activation, include both playing and paused videos
@@ -47,19 +38,26 @@ async function immediatelyRequestPiP() {
                 ended: video.ended
             });
             return pass;
+=======
+        .filter(v => v.readyState >= 2)
+        .filter(v => v.disablePictureInPicture == false)
+        .filter(v => {
+            const isPlaying = v.currentTime > 0 && !v.paused && !v.ended;
+            const isPaused = v.currentTime > 0 && v.paused && !v.ended;
+            const hasContent = v.readyState >= 2 && v.duration > 0 && !v.ended;
+            return isPlaying || isPaused || hasContent;
+>>>>>>> 110258d2fe1bf70f96f11ff02e131be8e9953b14
         })
-        .sort((v1, v2) => {
-            const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
-            const v2Rect = v2.getClientRects()[0] || { width: 0, height: 0 };
-            return ((v2Rect.width * v2Rect.height) - (v1Rect.width * v1Rect.height));
+        .sort((a, b) => {
+            const ar = a.getClientRects()[0] || { width: 0, height: 0 };
+            const br = b.getClientRects()[0] || { width: 0, height: 0 };
+            return (br.width * br.height) - (ar.width * ar.height);
         });
 
-    if (videos.length === 0) {
-        console.log("❌ No suitable videos found for manual PiP");
-        return false;
-    }
+    if (videos.length === 0) return false;
 
     const video = videos[0];
+<<<<<<< HEAD
     console.log("🎥 Found video for manual PiP:", {
         paused: video.paused,
         currentTime: video.currentTime,
@@ -71,18 +69,18 @@ async function immediatelyRequestPiP() {
         video.removeAttribute("disablePictureInPicture");
     }
     video.requestPictureInPicture().then(() => {
+=======
+    try {
+        await video.requestPictureInPicture();
+>>>>>>> 110258d2fe1bf70f96f11ff02e131be8e9953b14
         video.setAttribute('__pip__', true);
-        video.addEventListener('leavepictureinpicture', event => {
+        video.addEventListener('leavepictureinpicture', () => {
             video.removeAttribute('__pip__');
-            console.log("📺 Left immediate PiP mode");
         }, { once: true });
-        console.log("✅ Immediate PiP activated successfully! (video was", video.paused ? "paused" : "playing", ")");
         return true;
-    }).catch(error => {
-        console.error("❌ Immediate PiP request failed:", error);
+    } catch (e) {
         return false;
-    });
-}
+    }
+})();
 
-// Execute the function
-immediatelyRequestPiP(); 
+
