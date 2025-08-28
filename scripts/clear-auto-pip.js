@@ -33,6 +33,13 @@ function clearAutoPiPHandlers() {
 
 
 
+        // Also reset our registration guard so re-enable can re-register
+        try {
+            if (typeof window !== 'undefined' && window.__auto_pip_registered__) {
+                try { delete window.__auto_pip_registered__; } catch (_) { window.__auto_pip_registered__ = false; }
+            }
+        } catch (_) { }
+
         return { success: true, reason: "All handlers cleared" };
     } catch (error) {
 

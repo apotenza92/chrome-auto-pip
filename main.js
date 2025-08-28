@@ -4,6 +4,8 @@ var targetTab = null;
 var pipActiveTab = null; // Track which tab has active PiP
 var autoPipEnabled = true; // Default to enabled
 var log = []
+var settingsLoaded = false;
+var settingsReady = null;
 
 // Helper function to check if a URL is restricted (chrome://, chrome-extension://, etc.)
 function isRestrictedUrl(url) {
@@ -12,18 +14,52 @@ function isRestrictedUrl(url) {
   return restrictedProtocols.some(protocol => url.startsWith(protocol));
 }
 
-// Helper function to load settings
+// Helper function to load settings (local cache first, then sync authoritative)
 async function loadSettings() {
   try {
+    // Fast path: local cache for immediate availability
+    try {
+      const local = await chrome.storage.local.get(['autoPipEnabled']);
+      if (typeof local.autoPipEnabled === 'boolean') {
+        autoPipEnabled = local.autoPipEnabled;
+      }
+    } catch (e) {
+    }
+
+    // Authoritative: sync storage
     const result = await chrome.storage.sync.get(['autoPipEnabled']);
     autoPipEnabled = result.autoPipEnabled !== false; // Default to enabled
+    // Mirror to local cache (best-effort)
+    try { await chrome.storage.local.set({ autoPipEnabled }); } catch (_) { }
   } catch (error) {
+    // If sync is unavailable, ensure we have a sensible default and cache it
     autoPipEnabled = true; // Default to enabled
+    try { await chrome.storage.local.set({ autoPipEnabled }); } catch (_) { }
+  } finally {
+    settingsLoaded = true;
   }
 }
 
 // Load settings on startup
-loadSettings();
+settingsReady = loadSettings();
+
+// Also refresh settings when the service worker wakes up with browser startup
+if (chrome.runtime && chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(() => {
+    loadSettings();
+    // If enabled, re-register handlers on all tabs at startup
+    setTimeout(() => {
+      if (!autoPipEnabled) return;
+      chrome.tabs.query({}, (tabs) => {
+        if (!tabs) return;
+        tabs.forEach(tab => {
+          if (!tab || !tab.url || isRestrictedUrl(tab.url)) return;
+          safeExecuteScript(tab.id, ['./scripts/trigger-auto-pip.js'], () => { });
+        });
+      });
+    }, 300);
+  });
+}
 
 // Set default settings on first install
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -31,8 +67,19 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     try {
       await chrome.storage.sync.set({ autoPipEnabled: true });
       autoPipEnabled = true;
+      try { await chrome.storage.local.set({ autoPipEnabled: true }); } catch (_) { }
     } catch (error) {
     }
+    // On fresh install, proactively register handlers on all open tabs
+    setTimeout(() => {
+      chrome.tabs.query({}, (tabs) => {
+        if (!tabs) return;
+        tabs.forEach(tab => {
+          if (!tab || !tab.url || isRestrictedUrl(tab.url)) return;
+          safeExecuteScript(tab.id, ['./scripts/trigger-auto-pip.js'], () => { });
+        });
+      });
+    }, 300);
   }
 });
 
@@ -42,6 +89,8 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     const newValue = changes.autoPipEnabled.newValue;
     const oldValue = changes.autoPipEnabled.oldValue;
     autoPipEnabled = newValue;
+    // Mirror to local cache to keep fast path consistent
+    try { chrome.storage.local.set({ autoPipEnabled: newValue }); } catch (_) { }
 
     // If auto-PiP was disabled, clear MediaSession handlers on ALL tabs
     if (!newValue) {
@@ -67,28 +116,14 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       targetTab = null;
       pipActiveTab = null;
     } else if (newValue && oldValue === false) {
-      // If auto-PiP was re-enabled, check the current tab for videos
-
-      // Get the current active tab
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs.length > 0) {
-          const activeTab = tabs[0];
-          if (activeTab.url && !isRestrictedUrl(activeTab.url)) {
-            safeExecuteScript(activeTab.id, ['./scripts/check-video.js'], (results) => {
-              const hasVideo = results && results[0] && results[0].result;
-              if (hasVideo) {
-                targetTab = activeTab.id;
-                currentTab = activeTab.id;
-
-                // Setup MediaSession auto-PiP on the current tab
-                safeExecuteScript(targetTab, ['./scripts/trigger-auto-pip.js'], (autoResults) => {
-                  if (autoResults && autoResults[0]) {
-                  }
-                });
-              }
-            });
-          }
-        }
+      // Auto-PiP re-enabled: re-register handlers on all non-restricted tabs.
+      // Content scripts will notify when a video is playing to set targetTab.
+      chrome.tabs.query({}, (tabs) => {
+        if (!tabs || tabs.length === 0) return;
+        tabs.forEach((tab) => {
+          if (!tab || !tab.url || isRestrictedUrl(tab.url)) return;
+          safeExecuteScript(tab.id, ['./scripts/trigger-auto-pip.js'], () => { });
+        });
       });
     }
   }
