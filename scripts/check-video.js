@@ -1,71 +1,59 @@
 // --- [ FUNCTION: Get Video ] --- //
 function hasPlayingVideo() {
+  try {
+    const allVideos = Array.from(document.querySelectorAll('video'));
 
+    if (!allVideos || allVideos.length === 0) {
+      return false;
+    }
 
-  const allVideos = Array.from(document.querySelectorAll('video'));
+    // Candidates that are PiP-eligible and at least have metadata ready
+    const candidates = allVideos
+      .filter((video) => typeof video.readyState === 'number' && video.readyState >= 1)
+      // Allow videos even if disablePictureInPicture is set; we can temporarily remove it when requesting PiP
+      .filter((video) => !!video)
+      .filter((video) => {
+        const rect = video.getClientRects()[0];
+        return rect && rect.width > 0 && rect.height > 0; // visible area
+      });
 
+    if (candidates.length === 0) {
+      try {
+        console.debug('[auto-pip][check-video] No candidates found', {
+          url: window.location.href,
+          title: document.title,
+          totalVideos: allVideos.length
+        });
+      } catch (_) { }
+      return false;
+    }
 
-  allVideos.forEach((video, index) => {
+    // If any are actively playing, that's a strong signal
+    const anyPlaying = candidates.some((video) => video.currentTime > 0 && !video.paused && !video.ended);
+    if (anyPlaying) {
+      try {
+        const playingCount = candidates.filter((v) => v.currentTime > 0 && !v.paused && !v.ended).length;
+        console.debug('[auto-pip][check-video] Playing candidates detected', { count: playingCount });
+      } catch (_) { }
+      return true;
+    }
 
-    readyState: video.readyState,
-      currentTime: video.currentTime,
-        paused: video.paused,
-          ended: video.ended,
-            duration: video.duration,
-              disablePictureInPicture: video.disablePictureInPicture,
-                autoplay: video.autoplay,
-                  muted: video.muted,
-                    src: video.src || video.currentSrc || 'no src'
-  });
-});
-
-const videos = allVideos
-  .filter(video => {
-    // More lenient readyState check - allow videos that are still loading metadata
-    const pass = video.readyState >= 1; // HAVE_METADATA or higher
-
-    return pass;
-  })
-  .filter(video => {
-    const pass = video.disablePictureInPicture == false;
-
-    return pass;
-  })
-  .filter(video => {
-    // ONLY consider videos that are actively playing for automatic PiP
-    const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
-
-
-    isPlaying,
-      currentTime: video.currentTime,
-        paused: video.paused,
-          ended: video.ended,
-            readyState: video.readyState,
-              duration: video.duration,
-                autoplay: video.autoplay
-  });
-return isPlaying;
-    })
-    .sort((v1, v2) => {
-  const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
-  const v2Rect = v2.getClientRects()[0] || { width: 0, height: 0 };
-  return ((v2Rect.width * v2Rect.height) - (v1Rect.width * v1Rect.height));
-});
-
-
-
-// Also log some additional page information that might help with debugging
-
-url: window.location.href,
-  title: document.title,
-    readyState: document.readyState,
-      hidden: document.hidden
-  });
-
-
-
-if (videos.length === 0) return false;
-return true;
+    // Lenient behavior per recent PR: accept presence of a visible, PiP-eligible video with metadata
+    try {
+      const debug = candidates.slice(0, 3).map(v => ({
+        readyState: v.readyState,
+        paused: v.paused,
+        ended: v.ended,
+        duration: v.duration,
+        disablePictureInPicture: v.disablePictureInPicture,
+        hasAttr: v.hasAttribute && v.hasAttribute('disablePictureInPicture')
+      }));
+      console.debug('[auto-pip][check-video] Lenient accept: visible metadata candidates', { count: candidates.length, debug });
+    } catch (_) { }
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 hasPlayingVideo();
