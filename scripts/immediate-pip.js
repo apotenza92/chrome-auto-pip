@@ -20,7 +20,6 @@
     // Find a suitable video (manual: allow playing or paused with content)
     const videos = Array.from(document.querySelectorAll('video'))
         .filter(v => v.readyState >= 2)
-        .filter(v => v.disablePictureInPicture == false)
         .filter(v => {
             const isPlaying = v.currentTime > 0 && !v.paused && !v.ended;
             const isPaused = v.currentTime > 0 && v.paused && !v.ended;
@@ -36,11 +35,20 @@
     if (videos.length === 0) return false;
 
     const video = videos[0];
+    // Request PiP immediately (works with both playing and paused videos)
+
     try {
+        const hadDisableAttr = video.hasAttribute("disablePictureInPicture");
+        if (hadDisableAttr) {
+            video.removeAttribute("disablePictureInPicture");
+        }
         await video.requestPictureInPicture();
         video.setAttribute('__pip__', true);
         video.addEventListener('leavepictureinpicture', () => {
             video.removeAttribute('__pip__');
+            if (hadDisableAttr) {
+                video.setAttribute('disablePictureInPicture', '');
+            }
         }, { once: true });
         return true;
     } catch (e) {
