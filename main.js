@@ -130,6 +130,14 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       pipActiveTab = null;
     } else if (newValue && oldValue === false) {
       // If auto-PiP was re-enabled, check the current tab for videos
+      // Re-register MediaSession handlers on ALL tabs so existing pages work without refresh
+      chrome.tabs.query({}, (tabs) => {
+        if (!tabs) return;
+        tabs.forEach(tab => {
+          if (!isValidTab(tab)) return;
+          injectTriggerAutoPiP(tab.id, () => { });
+        });
+      });
 
       // Get the current active tab
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {

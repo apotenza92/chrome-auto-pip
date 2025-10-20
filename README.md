@@ -1,5 +1,7 @@
 # Chrome Automatic Picture-in-Picture (PiP)
 
+Free and open source.
+
 Automatically enables Picture-in-Picture when switching tabs like Arc or Firefox or Zen.
 
 Also works with Brave Browser (and I assume other Chromium based browsers, though I have not tested those).
