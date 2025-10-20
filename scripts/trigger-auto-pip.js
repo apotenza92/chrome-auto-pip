@@ -95,6 +95,37 @@ function triggerAutoPiP() {
 
         // Initial state
         updatePlaybackStateFromAnyVideo();
+
+        // Fallback for browsers/environments where MediaSession 'enterpictureinpicture'
+        // is not invoked on workspace/virtual-desktop/tab visibility changes (e.g., Vivaldi workspaces).
+        // When the page becomes hidden and a video is actively playing, attempt to enter PiP.
+        // If the browser requires a user gesture, this will be a no-op (caught below).
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState !== 'hidden') return;
+            // Only consider currently playing videos
+            const playing = findCurrentlyPlayingVideos();
+            if (playing.length === 0) return;
+            // Avoid re-requesting if already in PiP
+            if (document.pictureInPictureElement) return;
+
+            const video = playing[0];
+            try {
+                const hadDisableAttr = video.hasAttribute('disablePictureInPicture');
+                if (hadDisableAttr) {
+                    video.removeAttribute('disablePictureInPicture');
+                }
+                await video.requestPictureInPicture();
+                video.setAttribute('__pip__', true);
+                video.addEventListener('leavepictureinpicture', () => {
+                    video.removeAttribute('__pip__');
+                    if (hadDisableAttr) {
+                        video.setAttribute('disablePictureInPicture', '');
+                    }
+                }, { once: true });
+            } catch (e) {
+                // Ignore if not allowed without user gesture; MediaSession may still handle it elsewhere
+            }
+        }, true);
         return true;
     } catch (error) {
         return false;
