@@ -1,27 +1,24 @@
 // --- [ FUNCTION: Get Video ] --- //
 function getVideos() {
-  const allVideos = Array.from(document.querySelectorAll('video'));
+  function byPaintedAreaDesc(a, b) {
+    const ar = a.getClientRects()[0] || { width: 0, height: 0 };
+    const br = b.getClientRects()[0] || { width: 0, height: 0 };
+    return (br.width * br.height) - (ar.width * ar.height);
+  }
 
+  function isPlaying(video) {
+    return video.currentTime > 0 && !video.paused && !video.ended;
+  }
+
+  const allVideos = Array.from(document.querySelectorAll('video'));
   const videos = allVideos
+    .filter(video => video.readyState >= 2)
+    .filter(video => video.disablePictureInPicture == false)
     .filter(video => {
-      const pass = video.readyState >= 2;
-      return pass;
-    })
-    .filter(video => {
-      const pass = video.disablePictureInPicture == false;
-      return pass;
-    })
-    .filter(video => {
-      const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
       const isReadyToPlay = video.readyState >= 3 && !video.ended && video.duration > 0;
-      const pass = isPlaying || isReadyToPlay;
-      return pass;
+      return isPlaying(video) || isReadyToPlay;
     })
-    .sort((v1, v2) => {
-      const v1Rect = v1.getClientRects()[0] || { width: 0, height: 0 };
-      const v2Rect = v2.getClientRects()[0] || { width: 0, height: 0 };
-      return ((v2Rect.width * v2Rect.height) - (v1Rect.width * v1Rect.height));
-    });
+    .sort(byPaintedAreaDesc);
 
   if (videos.length === 0) return null;
   return videos[0];
@@ -107,6 +104,7 @@ function setupAutoPiPSupport() {
 
     return true;
   } catch (error) {
+    try { console.debug('[auto-pip][pip] setActionHandler error', { message: error && error.message }); } catch (_) { }
     return false;
   }
 }
