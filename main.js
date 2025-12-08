@@ -6,7 +6,6 @@ var autoPipEnabled = true; // Default to enabled
 var log = []
 var settingsLoaded = false;
 var settingsReady = null;
-// removed delayed exit behavior per user request
 
 // Helper function to check if a URL is restricted (chrome://, chrome-extension://, etc.)
 function isRestrictedUrl(url) {
@@ -15,7 +14,7 @@ function isRestrictedUrl(url) {
   return restrictedProtocols.some(protocol => url.startsWith(protocol));
 }
 
-// Small helpers to reduce repetition (no behavior changes)
+// Small helpers to reduce repetition
 function isValidTab(tab) {
   return !!(tab && tab.url && !isRestrictedUrl(tab.url));
 }
@@ -24,28 +23,30 @@ function hasAnyFrameTrue(results) {
   return Array.isArray(results) && results.some(frameResult => frameResult && frameResult.result);
 }
 
+// Script injection helpers - always inject utils.js first for shared functionality
+function injectWithUtils(tabId, scripts, callback) {
+  safeExecuteScript(tabId, ['./scripts/utils.js', './scripts/site-fixes.js', ...scripts], callback);
+}
+
 function injectTriggerAutoPiP(tabId, callback) {
-  safeExecuteScript(tabId, ['./scripts/trigger-auto-pip.js'], callback);
+  injectWithUtils(tabId, ['./scripts/trigger-auto-pip.js'], callback);
 }
 
 function injectCheckVideoScript(tabId, callback) {
-  safeExecuteScript(tabId, ['./scripts/check-video.js'], callback);
+  injectWithUtils(tabId, ['./scripts/check-video.js'], callback);
 }
 
 function injectExitPiPScript(tabId, callback) {
-  safeExecuteScript(tabId, ['./scripts/exit-pip.js'], callback);
+  injectWithUtils(tabId, ['./scripts/exit-pip.js'], callback);
 }
 
 function injectImmediatePiPScript(tabId, callback) {
-  safeExecuteScript(tabId, ['./scripts/immediate-pip.js'], callback);
+  injectWithUtils(tabId, ['./scripts/immediate-pip.js'], callback);
 }
 
 function injectClearAutoPiPScript(tabId, callback) {
   safeExecuteScript(tabId, ['./scripts/clear-auto-pip.js'], callback);
 }
-
-// Background logging (service worker only)
-// no background logs
 
 // Helper function to load settings (local cache first, then sync authoritative)
 async function loadSettings() {
@@ -88,7 +89,6 @@ if (chrome.runtime && chrome.runtime.onStartup) {
         tabs.forEach(tab => {
           if (!isValidTab(tab)) return;
           injectTriggerAutoPiP(tab.id, () => { });
-
         });
       });
     }, 300);
@@ -116,21 +116,16 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
     // If auto-PiP was disabled, clear MediaSession handlers on ALL tabs
     if (!newValue) {
-      // Clear MediaSession handlers on ALL tabs to ensure complete cleanup
       chrome.tabs.query({}, (tabs) => {
         tabs.forEach(tab => {
-          // Skip restricted URLs
           if (isRestrictedUrl(tab.url)) return;
           injectClearAutoPiPScript(tab.id, (results) => { });
-
         });
       });
-
       targetTab = null;
       pipActiveTab = null;
     } else if (newValue && oldValue === false) {
-      // If auto-PiP was re-enabled, check the current tab for videos
-      // Re-register MediaSession handlers on ALL tabs so existing pages work without refresh
+      // If auto-PiP was re-enabled, re-register on ALL tabs
       chrome.tabs.query({}, (tabs) => {
         if (!tabs) return;
         tabs.forEach(tab => {
@@ -139,7 +134,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         });
       });
 
-      // Get the current active tab
+      // Get the current active tab and check for videos
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs.length > 0) {
           const activeTab = tabs[0];
@@ -149,10 +144,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
               if (hasVideo) {
                 targetTab = activeTab.id;
                 currentTab = activeTab.id;
-
-                // Setup MediaSession auto-PiP on the current tab
                 injectTriggerAutoPiP(targetTab, (autoResults) => { });
-
               }
             });
           }
@@ -164,7 +156,6 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 // Helper function to safely execute scripts with error handling
 function safeExecuteScript(tabId, files, callback) {
-  // First check if the tab exists and get its URL
   chrome.tabs.get(tabId, (tab) => {
     if (chrome.runtime.lastError) {
       if (callback) callback(null);
@@ -189,24 +180,22 @@ function safeExecuteScript(tabId, files, callback) {
   });
 }
 
-// Wait for Chrome APIs to be available
+// Handle extension icon click to manually activate PiP
 if (typeof chrome !== 'undefined' && chrome.action) {
-  // Handle extension icon click to manually activate PiP
   chrome.action.onClicked.addListener(async (tab) => {
     if (isRestrictedUrl(tab.url)) {
       return;
     }
 
-
-    // Check if PiP is active on a different tab
+    // Check if PiP is active on a different tab - exit it there first
     if (pipActiveTab && pipActiveTab !== tab.id) {
-      safeExecuteScript(pipActiveTab, ['./scripts/pip.js'], (results) => {
+      injectExitPiPScript(pipActiveTab, (results) => {
         pipActiveTab = null;
       });
       return;
     }
 
-    // STEP 1: Try immediate PiP on current tab (works with both playing and paused videos)
+    // Try immediate PiP on current tab (works with both playing and paused videos)
     // This always happens regardless of auto-PiP setting - manual activation should always work
     injectImmediatePiPScript(tab.id, (pipResults) => {
       const frameValues = Array.isArray(pipResults)
@@ -217,29 +206,22 @@ if (typeof chrome !== 'undefined' && chrome.action) {
       const activated = frameValues.includes(true);
 
       if (toggledOff) {
-        // PiP was deactivated in some frame
         pipActiveTab = null;
       } else if (activated) {
-        // PiP was activated in some frame
         pipActiveTab = tab.id;
       }
     });
 
-    // STEP 2: Only setup auto-PiP for future tab switches if auto-PiP is enabled
-    // This prevents manual activation from re-enabling auto-PiP when it's disabled
+    // Only setup auto-PiP for future tab switches if auto-PiP is enabled
     if (autoPipEnabled) {
       injectTriggerAutoPiP(tab.id, (results) => {
-        const result = hasAnyFrameTrue(results)
+        const result = hasAnyFrameTrue(results);
         if (result) {
-          // Set this as the target tab for future auto-switching
           targetTab = tab.id;
-
         }
       });
     }
   });
-
-  // No keyboard shortcuts (removed per user request)
 }
 
 // Handle tab activation
@@ -247,106 +229,75 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
   chrome.tabs.onActivated.addListener(function (tab) {
     currentTab = tab.tabId;
 
-
-    // --- [1] : Check for playing videos *(set target)  ---
+    // Check for playing videos and set target if we don't have one
     if (targetTab === null && autoPipEnabled) {
       injectCheckVideoScript(currentTab, (results) => {
         const hasVideo = hasAnyFrameTrue(results);
         if (hasVideo) {
           targetTab = currentTab;
-          // Setup MediaSession auto-PiP on the video tab
           injectTriggerAutoPiP(targetTab, (autoResults) => { });
-
         }
-
-        // After video detection, check if we need to activate PiP
         checkAndActivatePiP();
       });
     } else if (targetTab === null && !autoPipEnabled) {
       checkAndActivatePiP();
     } else {
-      // If we already have a targetTab, proceed to check PiP conditions
       checkAndActivatePiP();
     }
 
     function checkAndActivatePiP() {
-      // --- [2] : Exit PiP *(if user is in target tab)  ---
+      // Exit PiP if user returned to the target tab
       if (currentTab === targetTab) {
-
-        // Clear PiP tracking since user returned to the video tab
         if (pipActiveTab === targetTab) {
           pipActiveTab = null;
         }
 
-        // Keep targetTab so a fast switch away re-triggers PiP without needing another click
-        // (Do not clear targetTab here)
-
-        // If page has a playing video, (re)affirm targetTab and setup auto-PiP
-        injectCheckVideoScript(currentTab, (results) => {
-          const hasVideo = hasAnyFrameTrue(results);
-          if (hasVideo) {
-            targetTab = currentTab;
-
-            // Setup MediaSession auto-PiP on the video tab
-            injectTriggerAutoPiP(targetTab, (autoResults) => { });
-
-          }
+        // First: Exit PiP and clear registration flag
+        // Then: Re-register MediaSession handlers for next tab switch
+        injectExitPiPScript(currentTab, () => {
+          // After exiting, check for video and re-register handlers
+          injectCheckVideoScript(currentTab, (results) => {
+            const hasVideo = hasAnyFrameTrue(results);
+            if (hasVideo) {
+              targetTab = currentTab;
+              injectTriggerAutoPiP(targetTab, (autoResults) => { });
+            }
+          });
         });
 
-        // Ensure PiP exits on return-to-tab to restore inline playback
-        injectExitPiPScript(currentTab, () => { });
-
-        // Log and exit - don't continue to section [3]
         prevTab = tab.tabId;
         return;
       }
 
-      // --- [3] : Auto-PiP should trigger automatically via MediaSession  ---
-
+      // Auto-PiP triggers automatically via MediaSession when leaving video tab
       if (targetTab != null && currentTab != targetTab && autoPipEnabled) {
-        // Track that PiP should be active on the target tab
         pipActiveTab = targetTab;
-        // No manual action needed - MediaSession API handles this automatically
       }
 
-      // --- [ Update ] ---
       prevTab = tab.tabId;
     }
   });
 
-  // Add tab update listener to detect when new pages load (for autoplay scenarios)
+  // Handle tab updates to detect when new pages load
   chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
-    // Inject MediaSession setup as early as possible on active tabs while loading
+    // Inject MediaSession setup early on active tabs while loading
     if (changeInfo.status === 'loading' && tab && tab.active && tab.url && !isRestrictedUrl(tab.url) && autoPipEnabled) {
-      safeExecuteScript(tabId, ['./scripts/site-fixes.js'], () => {
-        injectTriggerAutoPiP(tabId, (autoResults) => { });
-      });
-
+      injectTriggerAutoPiP(tabId, (autoResults) => { });
     }
 
-    // Only process when the page has finished loading
+    // When page finishes loading, check for videos
     if (changeInfo.status === 'complete' && tab.url && !isRestrictedUrl(tab.url)) {
-
-      // If this is the currently active tab and we don't have a target tab,
-      // check for videos after a short delay to allow for autoplay (only if auto-PiP is enabled)
       if (tabId === currentTab && targetTab === null && autoPipEnabled) {
         setTimeout(() => {
-          safeExecuteScript(tabId, ['./scripts/site-fixes.js'], () => {
-            injectCheckVideoScript(tabId, (results) => {
-              const hasVideo = hasAnyFrameTrue(results);
-              if (hasVideo) {
-                targetTab = tabId;
-
-                // Setup MediaSession auto-PiP on the video tab
-                injectTriggerAutoPiP(targetTab, (autoResults) => { });
-
-              }
-            });
+          injectCheckVideoScript(tabId, (results) => {
+            const hasVideo = hasAnyFrameTrue(results);
+            if (hasVideo) {
+              targetTab = tabId;
+              injectTriggerAutoPiP(targetTab, (autoResults) => { });
+            }
           });
         }, 2000); // Wait 2 seconds for autoplay to start
       }
-
-      // No overlay injection
     }
   });
 
@@ -357,18 +308,14 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
       if (message.type === 'auto_pip_video_playing') {
         const senderTabId = sender.tab.id;
         if (autoPipEnabled) {
-          // Prefer setting target when the user is on that tab (most common case)
           if (senderTabId === currentTab || targetTab === null) {
             targetTab = senderTabId;
-
-            // Ensure MediaSession auto-PiP is registered (idempotent)
             injectTriggerAutoPiP(targetTab, (autoResults) => { });
-
           }
         }
       }
     } catch (e) {
-      // TODO: Handle errors
+      // Ignore errors
     }
   });
 }

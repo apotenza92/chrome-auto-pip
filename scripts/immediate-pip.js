@@ -1,62 +1,64 @@
-// Function to immediately request PiP when icon is clicked
+// Immediately request PiP when extension icon is clicked
+// Works with both playing AND paused videos (manual activation)
+
 (async () => {
-    function byPaintedAreaDesc(a, b) {
-        const ar = a.getClientRects()[0] || { width: 0, height: 0 };
-        const br = b.getClientRects()[0] || { width: 0, height: 0 };
-        return (br.width * br.height) - (ar.width * ar.height);
-    }
+    'use strict';
 
-    function getCandidateVideos() {
-        return Array.from(document.querySelectorAll('video'))
-            .filter(v => v.readyState >= 2)
-            .filter(v => {
-                const isPlaying = v.currentTime > 0 && !v.paused && !v.ended;
-                const isPaused = v.currentTime > 0 && v.paused && !v.ended;
-                const hasContent = v.readyState >= 2 && v.duration > 0 && !v.ended;
-                return isPlaying || isPaused || hasContent;
-            })
-            .sort(byPaintedAreaDesc);
-    }
+    const utils = window.__auto_pip_utils__ || {};
+    const { findAllVideos, requestPiP, exitPiP } = utils;
 
-    // If PiP already active on this tab, exit it
+    // If PiP already active, exit it (toggle behavior)
     if (document.pictureInPictureElement) {
         try {
-            await document.exitPictureInPicture();
-            return "toggled_off";
-        } catch (e) {
+            if (exitPiP) {
+                await exitPiP();
+            } else {
+                await document.exitPictureInPicture();
+            }
+            return 'toggled_off';
+        } catch (_) {
             return false;
         }
     }
 
-    // Also clear local PiP marker if present
+    // Also check for local PiP marker
     const pipVideo = document.querySelector('[__pip__]');
     if (pipVideo) {
         pipVideo.removeAttribute('__pip__');
-        return "toggled_off";
+        return 'toggled_off';
     }
 
-    const videos = getCandidateVideos();
+    // Find candidate videos (more permissive for manual activation - includes paused)
+    let videos;
+    if (findAllVideos) {
+        videos = findAllVideos({
+            deep: false,
+            minReadyState: 2,
+            visibleOnly: false,
+            playingFirst: false
+        }).filter(v => {
+            const isPlaying = v.currentTime > 0 && !v.paused && !v.ended;
+            const isPaused = v.currentTime > 0 && v.paused && !v.ended;
+            const hasContent = v.readyState >= 2 && v.duration > 0 && !v.ended;
+            return isPlaying || isPaused || hasContent;
+        });
+    } else {
+        // Fallback
+        videos = Array.from(document.querySelectorAll('video'))
+            .filter(v => v.readyState >= 2);
+    }
+
     if (videos.length === 0) return false;
 
     const video = videos[0];
-
     try {
-        const hadDisableAttr = video.hasAttribute("disablePictureInPicture");
-        if (hadDisableAttr) {
-            video.removeAttribute("disablePictureInPicture");
+        if (requestPiP) {
+            await requestPiP(video);
+        } else {
+            await video.requestPictureInPicture();
         }
-        await video.requestPictureInPicture();
-        video.setAttribute('__pip__', true);
-        video.addEventListener('leavepictureinpicture', () => {
-            video.removeAttribute('__pip__');
-            if (hadDisableAttr) {
-                video.setAttribute('disablePictureInPicture', '');
-            }
-        }, { once: true });
         return true;
-    } catch (e) {
+    } catch (_) {
         return false;
     }
 })();
-
-

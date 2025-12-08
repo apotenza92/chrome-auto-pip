@@ -1,263 +1,283 @@
-// Function to trigger automatic PiP via MediaSession API (Chrome 134+)
-function triggerAutoPiP() {
+// Trigger automatic PiP via MediaSession API (Chrome 134+)
 
-    // Register in all frames; action only fires in the frame owning the active media session
+(function triggerAutoPiP() {
+    'use strict';
 
-    // Check if MediaSession API is supported
+    const DEBUG = true;
+    const log = (...args) => DEBUG && console.log('[auto-pip]', ...args);
+
+    log('trigger-auto-pip.js injected', { url: location.href, isChild: window.top !== window });
+
+    // Require MediaSession API
     if (!('mediaSession' in navigator)) {
+        log('MediaSession API not supported');
         return false;
     }
 
-    // (moved) Child-frame defer is handled below after registerAll is defined
-
-    // Avoid double-registering listeners on reinjection
+    // Avoid double-registering on reinjection
     if (window.__auto_pip_registered__) {
+        log('Already registered, skipping');
         return true;
     }
 
-    // Small helpers
-    function getActiveSiteFix() {
-        try {
-            const fixes = Array.isArray(window.__auto_pip_site_fixes__) ? window.__auto_pip_site_fixes__ : [];
-            const host = window.location && window.location.hostname;
-            for (let i = 0; i < fixes.length; i++) {
-                const fix = fixes[i];
-                try { if (fix && fix.test && fix.test.test(host)) return fix; } catch (_) { }
+    // Get shared utilities (injected before this script)
+    const utils = window.__auto_pip_utils__ || {};
+    const { findAllVideos, isPlaying, requestPiP, getActiveSiteFix } = utils;
+
+    // Get site-specific fix configuration
+    const ACTIVE_FIX = getActiveSiteFix ? getActiveSiteFix() : null;
+    const CHAIN_MEDIA_SESSION = !!(ACTIVE_FIX && ACTIVE_FIX.chainMediaSession);
+    const HIDDEN_ATTEMPT_ONCE = !!(ACTIVE_FIX && ACTIVE_FIX.visibilityHiddenAttemptOnce);
+    const DEFER_CHILD_UNTIL_VIDEO = !!(ACTIVE_FIX && ACTIVE_FIX.deferChildUntilVideo);
+
+    // Find best video for PiP (deep search, visible, playing first)
+    function getEligibleVideos() {
+        let videos;
+        if (findAllVideos) {
+            videos = findAllVideos({
+                deep: true,
+                minReadyState: 1,
+                visibleOnly: true,
+                playingFirst: true
+            });
+        } else {
+            videos = Array.from(document.querySelectorAll('video'))
+                .filter(v => v.readyState >= 1);
+        }
+        
+        // Add autopictureinpicture attribute to eligible videos
+        // This tells Chrome to auto-PiP when the tab becomes hidden
+        videos.forEach(v => {
+            if (!v.hasAttribute('autopictureinpicture')) {
+                v.setAttribute('autopictureinpicture', '');
+                log('Added autopictureinpicture attribute to video');
             }
-        } catch (_) { }
-        return null;
+        });
+        
+        return videos;
     }
-    const ACTIVE_FIX = getActiveSiteFix();
-    const CHAIN_MEDIA_SESSION = !!(ACTIVE_FIX && ACTIVE_FIX.chainMediaSession === true);
-    const HIDDEN_ATTEMPT_ONCE = !!(ACTIVE_FIX && ACTIVE_FIX.visibilityHiddenAttemptOnce === true);
-    const DEFER_CHILD_UNTIL_VIDEO = !!(ACTIVE_FIX && ACTIVE_FIX.deferChildUntilVideo === true);
-    const byPaintedAreaDesc = (a, b) => {
-        const ar = a.getClientRects()[0] || { width: 0, height: 0 };
-        const br = b.getClientRects()[0] || { width: 0, height: 0 };
-        return (br.width * br.height) - (ar.width * ar.height);
-    };
 
-    const isPlaying = v => v.currentTime > 0 && !v.paused && !v.ended;
+    // Main registration function
+    function registerAll() {
+        log('registerAll() called');
 
-    // Helper: deep video discovery (includes open shadow roots)
-    const findEligibleVideos = () => {
-        const collectVideosDeep = (root) => {
-            const found = [];
-            try { found.push(...root.querySelectorAll('video')); } catch (_) { }
+        // Handler for enterPiP action
+        const ensureEnterPiP = async () => {
+            log('ensureEnterPiP triggered!');
+            const candidates = getEligibleVideos();
+            log('Found candidates:', candidates.length, candidates.map(v => ({ paused: v.paused, readyState: v.readyState })));
+            
+            if (candidates.length === 0) {
+                log('No candidates, aborting');
+                return;
+            }
+            if (document.pictureInPictureElement) {
+                log('Already in PiP, aborting');
+                return;
+            }
+
+            const video = candidates[0];
             try {
-                const all = root.querySelectorAll('*');
-                for (let i = 0; i < all.length; i++) {
-                    const el = all[i];
-                    if (el && el.shadowRoot) {
-                        try { found.push(...collectVideosDeep(el.shadowRoot)); } catch (_) { }
-                    }
+                log('Requesting PiP for video', { paused: video.paused, src: video.src?.substring(0, 50) });
+                if (requestPiP) {
+                    await requestPiP(video);
+                } else {
+                    await video.requestPictureInPicture();
                 }
-            } catch (_) { }
-            return found;
+                log('PiP request successful');
+            } catch (err) {
+                log('PiP request failed:', err.message);
+            }
         };
 
-        const list = collectVideosDeep(document)
-            .filter(v => !!v)
-            .filter(v => typeof v.readyState === 'number' && v.readyState >= 1)
-            .filter(v => {
-                const r = v.getClientRects()[0];
-                return r && r.width > 0 && r.height > 0;
-            });
-
-        // Sort by painted area, playing videos first
-        const playing = list.filter(v => isPlaying(v)).sort(byPaintedAreaDesc);
-        const rest = list.filter(v => !isPlaying(v)).sort(byPaintedAreaDesc);
-        return playing.concat(rest);
-    };
-
-    // Register MediaSession action handler for automatic PiP regardless of current playback state
-    try {
-
-        const setEnterPiPHandler = () => {
+        // Site-specific: Chain MediaSession handler (e.g., Twitch)
+        if (CHAIN_MEDIA_SESSION && !navigator.mediaSession.__auto_pip_patched__) {
+            log('Patching MediaSession.setActionHandler for chaining');
             try {
-                const ensureEnterPiP = async () => {
-                    const candidates = findEligibleVideos();
-                    if (candidates.length === 0) return;
-                    if (document.pictureInPictureElement) return;
-                    const videoToUse = candidates[0];
-                    try {
-                        const hadDisableAttr = videoToUse.hasAttribute("disablePictureInPicture");
-                        if (hadDisableAttr) {
-                            videoToUse.removeAttribute("disablePictureInPicture");
-                        }
-                        await videoToUse.requestPictureInPicture();
-                        videoToUse.setAttribute('__pip__', true);
-                        videoToUse.addEventListener('leavepictureinpicture', event => {
-                            videoToUse.removeAttribute('__pip__');
-                            if (hadDisableAttr) {
-                                videoToUse.setAttribute('disablePictureInPicture', '');
-                            }
-                        }, { once: true });
-                    } catch (pipError) {
-                    }
-                };
-
-                try {
-                    if (CHAIN_MEDIA_SESSION && !navigator.mediaSession.__auto_pip_patched__) {
-                        const original = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
-                        navigator.mediaSession.setActionHandler = function (action, handler) {
-                            if (action === "enterpictureinpicture") {
-                                const combined = async (...args) => {
-                                    try { if (typeof handler === 'function') { await handler(...args); } } catch (_) { }
-                                    try { await ensureEnterPiP(); } catch (_) { }
-                                };
-                                return original(action, combined);
-                            }
-                            return original(action, handler);
+                const original = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
+                navigator.mediaSession.setActionHandler = function (action, handler) {
+                    log('setActionHandler called:', action, typeof handler);
+                    if (action === 'enterpictureinpicture') {
+                        const combined = async (...args) => {
+                            log('Chained enterpictureinpicture handler called');
+                            try { if (typeof handler === 'function') await handler(...args); } catch (_) { }
+                            try { await ensureEnterPiP(); } catch (_) { }
                         };
-                        navigator.mediaSession.__auto_pip_patched__ = true;
+                        return original(action, combined);
+                    }
+                    return original(action, handler);
+                };
+                navigator.mediaSession.__auto_pip_patched__ = true;
+            } catch (_) { }
+        }
+
+        // Register the enterPiP handler
+        log('Registering enterpictureinpicture handler');
+        navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
+
+        // Provide baseline metadata for media session recognition
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: document.title || 'Video Content',
+            artist: window.location.hostname,
+            album: 'Auto-PiP Extension',
+            artwork: [{
+                src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="%23FF0000"/><text x="48" y="56" text-anchor="middle" fill="white" font-size="24">📺</text></svg>',
+                sizes: '96x96',
+                type: 'image/svg+xml'
+            }]
+        });
+
+        // Sync playbackState with video state
+        function updatePlaybackState() {
+            const candidates = getEligibleVideos();
+            const hasPlaying = candidates.length > 0 && isPlaying && isPlaying(candidates[0]);
+            const newState = hasPlaying ? 'playing' : 'paused';
+            log('updatePlaybackState:', newState, 'candidates:', candidates.length);
+            navigator.mediaSession.playbackState = newState;
+
+            // Notify background when playback starts
+            if (hasPlaying) {
+                try {
+                    if (chrome?.runtime?.sendMessage) {
+                        chrome.runtime.sendMessage({ type: 'auto_pip_video_playing' });
                     }
                 } catch (_) { }
-
-                navigator.mediaSession.setActionHandler("enterpictureinpicture", ensureEnterPiP);
-                // Clean implementation: no extra activation listeners
-            } catch (e) {
             }
-        };
+        }
 
-        const registerAll = () => {
-            setEnterPiPHandler();
-
-            // Provide baseline metadata so the page is recognized as a media session early
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: document.title || 'Video Content',
-                artist: window.location.hostname,
-                album: 'Auto-PiP Extension',
-                artwork: [
-                    {
-                        src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="%23FF0000"/><text x="48" y="56" text-anchor="middle" fill="white" font-size="24">📺</text></svg>',
-                        sizes: '96x96',
-                        type: 'image/svg+xml'
+        // Listen for video events
+        ['play', 'pause', 'loadedmetadata'].forEach(eventType => {
+            document.addEventListener(eventType, (e) => {
+                if (e.target?.tagName === 'VIDEO') {
+                    log('Video event:', eventType);
+                    // Ensure autopictureinpicture attribute is set
+                    if (!e.target.hasAttribute('autopictureinpicture')) {
+                        e.target.setAttribute('autopictureinpicture', '');
+                        log('Added autopictureinpicture on', eventType);
                     }
-                ]
-            });
-
-            // Keep playbackState loosely in sync across any videos on the page
-            const updatePlaybackStateFromAnyVideo = () => {
-                const candidates = findEligibleVideos();
-                const state = candidates.length > 0 && isPlaying(candidates[0]) ? 'playing' : 'paused';
-                navigator.mediaSession.playbackState = state;
-
-                // Notify background once when playback starts so it can set targetTab immediately
-                if (state === 'playing') {
-                    try {
-                        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-                            chrome.runtime.sendMessage({ type: 'auto_pip_video_playing' });
-                        }
-                    } catch (e) {
-                        // ignore
-                    }
+                    updatePlaybackState();
                 }
+            }, true);
+        });
+
+        // Manage MediaSession on visibility changes
+        document.addEventListener('visibilitychange', () => {
+            log('visibilitychange:', document.visibilityState);
+            
+            if (document.visibilityState === 'visible') {
+                // Tab became visible - refresh MediaSession state
+                log('Tab became visible, refreshing MediaSession state');
+                setTimeout(() => {
+                    updatePlaybackState();
+                    // Re-register our handler in case it was overwritten
+                    navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
+                    log('MediaSession refreshed on visibility');
+                }, 100);
+            } else if (document.visibilityState === 'hidden') {
+                // Tab becoming hidden - ensure MediaSession is properly set for auto-PiP
+                log('Tab becoming hidden, ensuring MediaSession is ready');
+                const candidates = getEligibleVideos();
+                if (candidates.length > 0 && isPlaying && isPlaying(candidates[0])) {
+                    navigator.mediaSession.playbackState = 'playing';
+                    navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
+                    log('MediaSession set to playing before hide, handler registered');
+                }
+            }
+        }, true);
+
+        updatePlaybackState();
+
+        // Site-specific: Fallback visibility-based PiP attempt (e.g., Twitch)
+        // Note: With autopictureinpicture attribute, browser should handle this automatically
+        // This fallback is only for cases where the browser's auto-PiP doesn't trigger
+        if (HIDDEN_ATTEMPT_ONCE) {
+            log('Setting up visibility-based PiP fallback');
+            let lastUserGestureTime = Date.now(); // Track when we last had a user gesture
+            
+            // Track user gestures so we know if we can request PiP
+            const trackGesture = () => {
+                lastUserGestureTime = Date.now();
+                log('User gesture detected');
             };
+            document.addEventListener('click', trackGesture, true);
+            document.addEventListener('keydown', trackGesture, true);
+            
+            document.addEventListener('visibilitychange', async () => {
+                if (document.visibilityState !== 'hidden') return;
+                if (document.pictureInPictureElement) return;
 
-            // Listen for play/pause events bubbling from any video
-            document.addEventListener('play', (e) => {
-                if (e.target && e.target.tagName === 'VIDEO') {
-                    updatePlaybackStateFromAnyVideo();
-                    setEnterPiPHandler();
+                const candidates = getEligibleVideos();
+                if (candidates.length === 0) return;
+                
+                // Ensure autopictureinpicture is set - browser should handle auto-PiP
+                const video = candidates[0];
+                if (!video.hasAttribute('autopictureinpicture')) {
+                    video.setAttribute('autopictureinpicture', '');
                 }
-            }, true);
-            document.addEventListener('pause', (e) => {
-                if (e.target && e.target.tagName === 'VIDEO') {
-                    updatePlaybackStateFromAnyVideo();
-                    setEnterPiPHandler();
-                }
-            }, true);
-            document.addEventListener('loadedmetadata', (e) => {
-                if (e.target && e.target.tagName === 'VIDEO') {
-                    updatePlaybackStateFromAnyVideo();
-                    setEnterPiPHandler();
-                }
-            }, true);
-
-            // Initial state
-            updatePlaybackStateFromAnyVideo();
-
-            try {
-                if (HIDDEN_ATTEMPT_ONCE) {
-                    document.addEventListener('visibilitychange', async () => {
-                        if (document.visibilityState !== 'hidden') return;
-                        if (document.pictureInPictureElement) return;
-                        const candidates = findEligibleVideos();
-                        if (candidates.length === 0) return;
-                        const video = candidates[0];
-                        try {
-                            const hadDisableAttr = video.hasAttribute('disablePictureInPicture');
-                            if (hadDisableAttr) video.removeAttribute('disablePictureInPicture');
+                
+                // Only try manual fallback if we have a recent user gesture (within 5 seconds)
+                const timeSinceGesture = Date.now() - lastUserGestureTime;
+                if (timeSinceGesture < 5000) {
+                    log('Visibility fallback - attempting with recent user gesture');
+                    try {
+                        if (requestPiP) {
+                            await requestPiP(video);
+                        } else {
                             await video.requestPictureInPicture();
-                            video.setAttribute('__pip__', true);
-                            video.addEventListener('leavepictureinpicture', () => {
-                                video.removeAttribute('__pip__');
-                                if (hadDisableAttr) video.setAttribute('disablePictureInPicture', '');
-                            }, { once: true });
-                        } catch (_) { }
-                    }, true);
-                }
-            } catch (_) { }
-
-            // Mark as fully registered
-            window.__auto_pip_registered__ = true;
-            return true;
-        };
-        // In child frames, defer until a <video> exists (deep scan) to avoid premature no-op registration
-        try {
-            if (DEFER_CHILD_UNTIL_VIDEO) {
-                const isChild = !!(window.top && window.top !== window);
-                const hasDeepVideo = (function () {
-                    const stack = [document];
-                    while (stack.length) {
-                        const root = stack.pop();
-                        try { if (root.querySelector && root.querySelector('video')) return true; } catch (_) { }
-                        try {
-                            const all = root.querySelectorAll ? root.querySelectorAll('*') : [];
-                            for (let i = 0; i < all.length; i++) {
-                                const el = all[i];
-                                if (el && el.shadowRoot) stack.push(el.shadowRoot);
-                            }
-                        } catch (_) { }
-                    }
-                    return false;
-                })();
-                if (isChild && !hasDeepVideo) {
-                    const observer = new MutationObserver(() => {
-                        const nowHasVideo = (function () {
-                            const stack = [document];
-                            while (stack.length) {
-                                const root = stack.pop();
-                                try { if (root.querySelector && root.querySelector('video')) return true; } catch (_) { }
-                                try {
-                                    const all = root.querySelectorAll ? root.querySelectorAll('*') : [];
-                                    for (let i = 0; i < all.length; i++) {
-                                        const el = all[i];
-                                        if (el && el.shadowRoot) stack.push(el.shadowRoot);
-                                    }
-                                } catch (_) { }
-                            }
-                            return false;
-                        })();
-                        if (nowHasVideo) {
-                            try { observer.disconnect(); } catch (_) { }
-                            registerAll();
                         }
-                    });
-                    observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
-                    return true;
+                        log('Visibility fallback PiP successful');
+                    } catch (err) {
+                        log('Visibility fallback PiP failed:', err.message);
+                    }
+                } else {
+                    log('No recent user gesture, relying on autopictureinpicture attribute');
                 }
-            }
-        } catch (_) { }
+            }, true);
+        }
 
-        // Always register immediately when appropriate frame has/owns media
-        registerAll();
-
-    } catch (error) {
-        return false;
+        window.__auto_pip_registered__ = true;
+        log('Registration complete');
+        return true;
     }
-}
 
-// Execute the function
-triggerAutoPiP(); 
+    // Site-specific: Defer registration in child frames until video exists (e.g., Twitch)
+    if (DEFER_CHILD_UNTIL_VIDEO) {
+        const isChildFrame = window.top !== window;
+
+        // Deep video detection including shadow DOM
+        const hasDeepVideo = () => {
+            const stack = [document];
+            while (stack.length) {
+                const root = stack.pop();
+                try {
+                    if (root.querySelector && root.querySelector('video')) return true;
+                } catch (_) { }
+                try {
+                    const all = root.querySelectorAll ? root.querySelectorAll('*') : [];
+                    for (let i = 0; i < all.length; i++) {
+                        const el = all[i];
+                        if (el && el.shadowRoot) stack.push(el.shadowRoot);
+                    }
+                } catch (_) { }
+            }
+            return false;
+        };
+
+        if (isChildFrame && !hasDeepVideo()) {
+            const observer = new MutationObserver(() => {
+                if (hasDeepVideo()) {
+                    observer.disconnect();
+                    registerAll();
+                }
+            });
+            observer.observe(document.documentElement || document.body, {
+                childList: true,
+                subtree: true
+            });
+            return true;
+        }
+    }
+
+    // Register immediately
+    return registerAll();
+})();

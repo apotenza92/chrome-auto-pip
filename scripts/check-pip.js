@@ -1,28 +1,31 @@
-function checkpip() {
-  function byPaintedAreaDesc(a, b) {
-    const ar = a.getClientRects()[0] || { width: 0, height: 0 };
-    const br = b.getClientRects()[0] || { width: 0, height: 0 };
-    return (br.width * br.height) - (ar.width * ar.height);
-  }
+// Check if PiP is currently active on this page
 
-  function getEligibleVideos() {
-    return Array.from(document.querySelectorAll('video'))
-      .filter(video => video.readyState >= 2) // HAVE_CURRENT_DATA or higher (ready to play)
-      .filter(video => video.disablePictureInPicture == false)
-      .filter(video => {
-        // Check if video is currently playing OR if it's ready to play and not explicitly paused
-        const isPlaying = video.currentTime > 0 && !video.paused && !video.ended;
-        const isReadyToPlay = video.readyState >= 3 && !video.ended && video.duration > 0;
-        return isPlaying || isReadyToPlay;
-      })
-      .sort(byPaintedAreaDesc);
-  }
+(function checkPiP() {
+    'use strict';
 
-  const videos = getEligibleVideos();
-  let pipCount = 0;
-  videos.forEach(video => { if (video.hasAttribute('__pip__')) pipCount++; });
-  if (pipCount > 0) return true; // has pip
-  else return false; // no pip found
-}
+    const utils = window.__auto_pip_utils__ || {};
+    const { findAllVideos } = utils;
 
-checkpip();
+    let videos;
+    if (findAllVideos) {
+        videos = findAllVideos({
+            deep: false,
+            minReadyState: 2,
+            visibleOnly: false,
+            checkDisabled: true,
+            playingFirst: false
+        }).filter(v => {
+            const isPlaying = v.currentTime > 0 && !v.paused && !v.ended;
+            const isReadyToPlay = v.readyState >= 3 && !v.ended && v.duration > 0;
+            return isPlaying || isReadyToPlay;
+        });
+    } else {
+        // Fallback
+        videos = Array.from(document.querySelectorAll('video'))
+            .filter(v => v.readyState >= 2)
+            .filter(v => v.disablePictureInPicture === false);
+    }
+
+    // Check if any video has the PiP marker
+    return videos.some(v => v.hasAttribute('__pip__'));
+})();

@@ -39,6 +39,30 @@ Includes one click activation of Picture-in-Picture through plugin icon.
 
 **Manual:** Click the extension icon to immediately activate PiP on the current video
 
+## How It Works
+
+This extension uses Chrome's [MediaSession API](https://developer.chrome.com/blog/automatic-picture-in-picture-media-playback) to register an `enterpictureinpicture` handler and sets the `autopictureinpicture` attribute on videos. When you switch tabs away from a playing video, Chrome's built-in auto-PiP feature (enabled via the flag) automatically triggers PiP.
+
+## Site Compatibility
+
+### Sites That Work Seamlessly
+Most video sites work automatically, including:
+- YouTube
+- Netflix
+- Vimeo
+- And many others where the video is in the main page frame
+
+### Sites Requiring User Interaction
+
+**Twitch** and similar sites that embed video players in iframes may require a click or keyboard input on the page before auto-PiP will activate when switching tabs.
+
+**Why?** Chrome's auto-PiP has a security requirement that [media must be in the top frame](https://developer.chrome.com/blog/automatic-picture-in-picture-media-playback). When the video is in an iframe (like Twitch's player), Chrome requires a recent user gesture to allow PiP.
+
+**Workaround:** Simply click anywhere on the Twitch page before switching tabs. After that initial interaction, auto-PiP should work. If you return to the tab and want to switch away again, another click may be needed.
+
+> **Note:** Firefox's built-in auto-PiP feature doesn't have this limitation because it's implemented at the browser level with elevated privileges, not as an extension subject to web security policies.
+
 ## Requirements
 
 - Chrome 134+ or compatible Chromium browser
+- The `auto-picture-in-picture-for-video-playback` flag must be enabled
