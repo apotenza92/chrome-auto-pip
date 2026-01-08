@@ -1,6 +1,10 @@
 // Function to clear MediaSession auto-PiP handlers
 function clearAutoPiPHandlers() {
     try {
+        // Set the disabled flag FIRST - this tells existing event handlers to stop working
+        // This is critical because event listeners stay attached even after we clear handlers
+        window.__auto_pip_disabled__ = true;
+
         // Check if MediaSession API is supported
         if (!('mediaSession' in navigator)) {
             return { success: true, reason: "MediaSession API not supported" };
@@ -24,6 +28,27 @@ function clearAutoPiPHandlers() {
                 // Ignore errors for unsupported actions
             }
         });
+
+        // Remove autopictureinpicture attribute from all videos
+        // This attribute tells Chrome to auto-PiP when tab becomes hidden
+        try {
+            const videos = document.querySelectorAll('video[autopictureinpicture]');
+            videos.forEach(video => {
+                video.removeAttribute('autopictureinpicture');
+            });
+            // Also check shadow DOM
+            const allElements = document.querySelectorAll('*');
+            allElements.forEach(el => {
+                if (el.shadowRoot) {
+                    try {
+                        const shadowVideos = el.shadowRoot.querySelectorAll('video[autopictureinpicture]');
+                        shadowVideos.forEach(video => {
+                            video.removeAttribute('autopictureinpicture');
+                        });
+                    } catch (_) { }
+                }
+            });
+        } catch (_) { }
 
         // Also clear any in-page flags so re-registration on re-enable will run
         try {

@@ -14,10 +14,18 @@
         return false;
     }
 
+    // Clear the disabled flag since we're being (re-)enabled
+    window.__auto_pip_disabled__ = false;
+
     // Avoid double-registering on reinjection
     if (window.__auto_pip_registered__) {
         log('Already registered, skipping');
         return true;
+    }
+
+    // Helper to check if auto-PiP is currently disabled
+    function isDisabled() {
+        return window.__auto_pip_disabled__ === true;
     }
 
     // Get shared utilities (injected before this script)
@@ -47,12 +55,15 @@
         
         // Add autopictureinpicture attribute to eligible videos
         // This tells Chrome to auto-PiP when the tab becomes hidden
-        videos.forEach(v => {
-            if (!v.hasAttribute('autopictureinpicture')) {
-                v.setAttribute('autopictureinpicture', '');
-                log('Added autopictureinpicture attribute to video');
-            }
-        });
+        // Only add if auto-PiP is not disabled
+        if (!isDisabled()) {
+            videos.forEach(v => {
+                if (!v.hasAttribute('autopictureinpicture')) {
+                    v.setAttribute('autopictureinpicture', '');
+                    log('Added autopictureinpicture attribute to video');
+                }
+            });
+        }
         
         return videos;
     }
@@ -64,6 +75,13 @@
         // Handler for enterPiP action
         const ensureEnterPiP = async () => {
             log('ensureEnterPiP triggered!');
+            
+            // Check if auto-PiP has been disabled
+            if (isDisabled()) {
+                log('Auto-PiP is disabled, aborting');
+                return;
+            }
+            
             const candidates = getEligibleVideos();
             log('Found candidates:', candidates.length, candidates.map(v => ({ paused: v.paused, readyState: v.readyState })));
             
@@ -129,6 +147,12 @@
 
         // Sync playbackState with video state
         function updatePlaybackState() {
+            // Check if auto-PiP has been disabled
+            if (isDisabled()) {
+                log('updatePlaybackState: Auto-PiP is disabled, skipping');
+                return;
+            }
+            
             const candidates = getEligibleVideos();
             const hasPlaying = candidates.length > 0 && isPlaying && isPlaying(candidates[0]);
             const newState = hasPlaying ? 'playing' : 'paused';
@@ -150,6 +174,13 @@
             document.addEventListener(eventType, (e) => {
                 if (e.target?.tagName === 'VIDEO') {
                     log('Video event:', eventType);
+                    
+                    // Check if auto-PiP has been disabled
+                    if (isDisabled()) {
+                        log('Auto-PiP is disabled, ignoring video event');
+                        return;
+                    }
+                    
                     // Ensure autopictureinpicture attribute is set
                     if (!e.target.hasAttribute('autopictureinpicture')) {
                         e.target.setAttribute('autopictureinpicture', '');
@@ -164,10 +195,21 @@
         document.addEventListener('visibilitychange', () => {
             log('visibilitychange:', document.visibilityState);
             
+            // Check if auto-PiP has been disabled - if so, don't do anything
+            if (isDisabled()) {
+                log('Auto-PiP is disabled, ignoring visibility change');
+                return;
+            }
+            
             if (document.visibilityState === 'visible') {
                 // Tab became visible - refresh MediaSession state
                 log('Tab became visible, refreshing MediaSession state');
                 setTimeout(() => {
+                    // Re-check disabled state after timeout
+                    if (isDisabled()) {
+                        log('Auto-PiP disabled during timeout, aborting refresh');
+                        return;
+                    }
                     updatePlaybackState();
                     // Re-register our handler in case it was overwritten
                     navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
@@ -203,6 +245,12 @@
             document.addEventListener('keydown', trackGesture, true);
             
             document.addEventListener('visibilitychange', async () => {
+                // Check if auto-PiP has been disabled
+                if (isDisabled()) {
+                    log('Auto-PiP is disabled, ignoring visibility fallback');
+                    return;
+                }
+                
                 if (document.visibilityState !== 'hidden') return;
                 if (document.pictureInPictureElement) return;
 
