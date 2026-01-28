@@ -1,5 +1,7 @@
 # Chrome Automatic Picture-in-Picture (PiP)
 
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=000000)](https://buymeacoffee.com/apotenza)
+
 Free and open source.
 
 Automatically enables Picture-in-Picture when switching tabs like Arc or Firefox or Zen.
@@ -35,7 +37,7 @@ Includes one click activation of Picture-in-Picture through plugin icon.
 
 ## Usage
 
-**Automatic:** Switch tabs away from a video and it will automatically enter PiP
+**Automatic:** Switch tabs away from a video or switch to another window/app and it will automatically enter PiP
 
 **Manual:** Click the extension icon to immediately activate PiP on the current video
 

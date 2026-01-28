@@ -30,7 +30,7 @@
 
     // Get shared utilities (injected before this script)
     const utils = window.__auto_pip_utils__ || {};
-    const { findAllVideos, isPlaying, requestPiP, getActiveSiteFix } = utils;
+    const { findAllVideos, isPlaying, requestPiP, supportsDocumentPiP, requestDocumentPiP, loadPiPSettings, calculatePiPDimensions, getActiveSiteFix } = utils;
 
     // Get site-specific fix configuration
     const ACTIVE_FIX = getActiveSiteFix ? getActiveSiteFix() : null;
@@ -97,12 +97,38 @@
             const video = candidates[0];
             try {
                 log('Requesting PiP for video', { paused: video.paused, src: video.src?.substring(0, 50) });
-                if (requestPiP) {
-                    await requestPiP(video);
-                } else {
-                    await video.requestPictureInPicture();
+                
+                // Load settings for Document PiP
+                let settings = { pipSize: 80 };
+                if (utils.loadPiPSettings) {
+                    settings = await utils.loadPiPSettings();
                 }
-                log('PiP request successful');
+
+                // Use Document PiP if supported and we have settings
+                if (utils.supportsDocumentPiP && utils.requestDocumentPiP && settings.pipSize) {
+                    const intrinsicRatio = video.videoWidth && video.videoHeight
+                        ? (video.videoWidth / video.videoHeight)
+                        : null;
+                    const rect = video.getBoundingClientRect();
+                    const fallbackRatio = rect.width && rect.height ? (rect.width / rect.height) : null;
+                    const aspectRatio = intrinsicRatio || fallbackRatio || (16 / 9);
+
+                    const { width, height } = utils.calculatePiPDimensions(
+                        settings.pipSize,
+                        aspectRatio,
+                        settings.displayInfo
+                    );
+                    await utils.requestDocumentPiP(video, { width, height, displayInfo: settings.displayInfo || null });
+                    log('Document PiP request successful');
+                } else {
+                    // Fallback to standard PiP
+                    if (requestPiP) {
+                        await requestPiP(video);
+                    } else {
+                        await video.requestPictureInPicture();
+                    }
+                    log('Standard PiP request successful');
+                }
             } catch (err) {
                 log('PiP request failed:', err.message);
             }

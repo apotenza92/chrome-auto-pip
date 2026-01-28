@@ -57,6 +57,12 @@
             margin: 0;
         }
 
+        .setting-note {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 6px;
+        }
+
         .toggle {
             position: relative;
             display: inline-block;
@@ -114,6 +120,23 @@
         .status.show {
             opacity: 1;
         }
+
+        select {
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: white;
+            font-size: 14px;
+            color: #1a1a1a;
+            cursor: pointer;
+            min-width: 80px;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
     </style>
 </head>
 
@@ -132,6 +155,36 @@
                 <input type="checkbox" id="autoPipEnabled">
                 <span class="slider"></span>
             </label>
+        </div>
+
+        <div class="setting" id="pipSizeSetting">
+            <div class="setting-info">
+                <div class="setting-title">PiP Window Size</div>
+                <div class="setting-description">
+                    Size of the Picture-in-Picture window as a percentage of screen width.
+                </div>
+                <div class="setting-note">
+                    Changing the size resets the PiP position to the bottom right.
+                </div>
+                <select id="pipSize">
+                    <option value="5">5%</option>
+                    <option value="10">10%</option>
+                    <option value="15">15%</option>
+                    <option value="20">20%</option>
+                    <option value="25">25%</option>
+                    <option value="30">30%</option>
+                    <option value="35">35%</option>
+                    <option value="40">40%</option>
+                    <option value="45">45%</option>
+                    <option value="50">50%</option>
+                    <option value="55">55%</option>
+                    <option value="60">60%</option>
+                    <option value="65">65%</option>
+                    <option value="70">70%</option>
+                    <option value="75">75%</option>
+                    <option value="80" selected>80% (default)</option>
+                </select>
+            </div>
         </div>
 
         <div class="status" id="status">Settings saved!</div>
