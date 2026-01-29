@@ -13,6 +13,24 @@ var settingsLoaded = false;
 var settingsReady = null;
 var displayInfo = null;
 
+function removeTabWithRetry(tabId, context, attempt = 0) {
+  if (tabId == null) return;
+
+  chrome.tabs.remove(tabId, () => {
+    if (chrome.runtime.lastError) {
+      const message = chrome.runtime.lastError.message || '';
+
+      const isBusy = message.includes('Tabs cannot be edited right now');
+      if (isBusy && attempt < 5) {
+        setTimeout(() => {
+          removeTabWithRetry(tabId, context, attempt + 1);
+        }, 150 * (attempt + 1));
+      }
+      return;
+    }
+  });
+}
+
 
 // Helper function to check if a URL is restricted (chrome://, chrome-extension://, etc.)
 function isRestrictedUrl(url) {
@@ -60,7 +78,7 @@ function activateFallbackTab(windowId, originalTabId) {
 
   const createBlankTab = (index) => {
     if (blurFallbackTempTabId != null) {
-      chrome.tabs.remove(blurFallbackTempTabId, () => { });
+      removeTabWithRetry(blurFallbackTempTabId, 'activateFallbackTab');
       blurFallbackTempTabId = null;
     }
 
@@ -132,11 +150,11 @@ async function loadSettings() {
     autoPipEnabled = result.autoPipEnabled !== false; // Default to enabled
     // pipSize doesn't need to be stored globally since content scripts read it directly
     // Mirror to local cache (best-effort)
-    try { await chrome.storage.local.set({ autoPipEnabled, pipSize: result.pipSize || 80, pipSizeCustom: result.pipSizeCustom === true }); } catch (_) { }
+    try { await chrome.storage.local.set({ autoPipEnabled, pipSize: result.pipSize || 25, pipSizeCustom: result.pipSizeCustom === true }); } catch (_) { }
   } catch (error) {
     // If sync is unavailable, ensure we have a sensible default and cache it
     autoPipEnabled = true; // Default to enabled
-    try { await chrome.storage.local.set({ autoPipEnabled, pipSize: 80, pipSizeCustom: false }); } catch (_) { }
+    try { await chrome.storage.local.set({ autoPipEnabled, pipSize: 25, pipSizeCustom: false }); } catch (_) { }
   } finally {
     settingsLoaded = true;
   }
@@ -206,7 +224,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     try {
       await chrome.storage.sync.clear();
       await chrome.storage.local.clear();
-      await chrome.storage.sync.set({ autoPipEnabled: true, pipSize: 80, pipSizeCustom: false });
+      await chrome.storage.sync.set({ autoPipEnabled: true, pipSize: 25, pipSizeCustom: false });
       autoPipEnabled = true;
     } catch (error) { }
   }
@@ -495,6 +513,17 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
       // Ignore errors
     }
   });
+
+  // Cleanup about:blank fallback when user activates another tab
+  chrome.tabs.onActivated.addListener((activeInfo) => {
+    if (blurFallbackWindowId == null || blurFallbackTempTabId == null) return;
+    if (activeInfo.windowId !== blurFallbackWindowId) return;
+    if (activeInfo.tabId === blurFallbackTempTabId) return;
+
+    const tempTabId = blurFallbackTempTabId;
+    removeTabWithRetry(tempTabId, 'onActivated');
+    clearBlurFallback();
+  });
 }
 
 // Track window focus changes for auto-PiP on window blur
@@ -568,7 +597,7 @@ if (typeof chrome !== 'undefined' && chrome.windows) {
 
         const cleanupFallback = () => {
           if (tempTabId != null) {
-            chrome.tabs.remove(tempTabId, () => { });
+            removeTabWithRetry(tempTabId, 'focusCleanup');
           }
           clearBlurFallback();
         };

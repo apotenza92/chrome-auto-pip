@@ -423,7 +423,7 @@
     // --- [ Settings Helpers ] --- //
     function normalizePipSize(value) {
         const parsed = parseInt(value, 10);
-        if (!Number.isFinite(parsed)) return 80;
+        if (!Number.isFinite(parsed)) return 25;
         return Math.min(80, Math.max(5, parsed));
     }
 
@@ -433,12 +433,12 @@
             let local = {};
             try { local = await chrome.storage.local.get(['displayInfo']); } catch (_) { }
             return {
-                pipSize: normalizePipSize(result.pipSize || 80), // Default 80%
+                pipSize: normalizePipSize(result.pipSize || 25), // Default 25%
                 autoPipEnabled: result.autoPipEnabled !== false,
                 displayInfo: local.displayInfo || null
             };
         } catch (error) {
-            return { pipSize: 80, autoPipEnabled: true, displayInfo: null };
+            return { pipSize: 25, autoPipEnabled: true, displayInfo: null };
         }
     }
 

@@ -60,7 +60,7 @@
     
     try {
         // Load settings for Document PiP
-        let settings = { pipSize: 80 };
+        let settings = { pipSize: 25 };
         if (loadPiPSettings) {
             settings = await loadPiPSettings();
         }

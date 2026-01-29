@@ -99,7 +99,7 @@
                 log('Requesting PiP for video', { paused: video.paused, src: video.src?.substring(0, 50) });
                 
                 // Load settings for Document PiP
-                let settings = { pipSize: 80 };
+                let settings = { pipSize: 25 };
                 if (utils.loadPiPSettings) {
                     settings = await utils.loadPiPSettings();
                 }

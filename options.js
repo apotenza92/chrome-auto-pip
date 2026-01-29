@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function normalizePipSize(value) {
         const parsed = parseInt(value, 10);
-        if (!Number.isFinite(parsed)) return 80;
+        if (!Number.isFinite(parsed)) return 25;
         return Math.min(80, Math.max(5, parsed));
     }
 
@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function getSelectedSize() {
         const selectedOption = pipSizeSelect.options[pipSizeSelect.selectedIndex];
-        if (!selectedOption) return 80;
+        if (!selectedOption) return 25;
         const isCustom = selectedOption.dataset.custom === 'true';
         const rawValue = isCustom
             ? selectedOption.value.replace('custom:', '')
@@ -86,7 +86,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const result = await chrome.storage.sync.get(['autoPipEnabled', 'pipSize', 'pipSizeCustom']);
             const enabled = result.autoPipEnabled !== false;
-            const size = normalizePipSize(result.pipSize || 80);
+            const size = normalizePipSize(result.pipSize || 25);
             const customActive = result.pipSizeCustom === true;
 
             autoPipToggle.checked = enabled;
@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 autoPipToggle.checked = true;
             }
             if (!pipSizeSelect.value) {
-                pipSizeSelect.value = '80';
+                pipSizeSelect.value = '25';
             }
         }
 
