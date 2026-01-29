@@ -7,8 +7,9 @@ Automatically enables Picture-in-Picture when switching tabs like Arc or Firefox
 Also enables Picture-in-Picture when switching windows or applications.
 
 Includes one click activation of Picture-in-Picture through plugin icon.
-
+<br><br>
 Enjoying the extension?
+
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=000000)](https://buymeacoffee.com/apotenza)
 
 ## Installation
