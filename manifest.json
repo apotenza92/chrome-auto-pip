@@ -1,6 +1,6 @@
 {
   "name": "Automatic Picture-in-Picture (PiP)",
-  "description": "Automatically enables Picture-in-Picture when switching tabs like Arc, Firefox, or Zen.",
+  "description": "Automatically enables Picture-in-Picture when switching tabs like Arc, Firefox, or Zen. Also enables Picture-in-Picture when switching windows or applications.",
   "version": "1.5.0",
   "manifest_version": 3,
   "icons": {
@@ -26,17 +26,11 @@
     "webNavigation",
     "system.display"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     {
-      "resources": [
-        "assets/*"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
+      "resources": ["assets/*"],
+      "matches": ["<all_urls>"]
     }
   ],
   "minimum_chrome_version": "134",
