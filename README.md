@@ -1,5 +1,7 @@
 # Chrome Automatic Picture-in-Picture (PiP)
 
+[Chrome Web Store](https://chromewebstore.google.com/detail/automatic-picture-in-pict/dmjccoaplbldlhhljlcldhaciadfhkcj)
+
 Free and open source.
 
 Automatically enables Picture-in-Picture when switching tabs like Arc or Firefox or Zen.
