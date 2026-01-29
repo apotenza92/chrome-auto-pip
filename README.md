@@ -3,6 +3,7 @@
 Free and open source.
 
 Automatically enables Picture-in-Picture when switching tabs like Arc or Firefox or Zen.
+
 Also enables Picture-in-Picture when switching windows or applications.
 
 Includes one click activation of Picture-in-Picture through plugin icon.
