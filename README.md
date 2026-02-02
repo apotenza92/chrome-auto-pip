@@ -47,6 +47,17 @@ Enjoying the extension?
 
 **PiP size:** Choose a default PiP window size in options; manual resize is remembered as a custom size
 
+**Disabled sites:** Auto-PiP is disabled on specific domains. You can add or remove domains in the Options page. Use a `*.` prefix to include subdomains (e.g. `*.zoom.us`).
+
+Default disabled sites:
+- `meet.google.com`
+- `*.zoom.us`
+- `zoom.com`
+- `teams.microsoft.com`
+- `teams.live.com`
+- `*.slack.com`
+- `*.discord.com`
+
 ## How It Works
 
 This extension uses Chrome's [MediaSession API](https://developer.chrome.com/blog/automatic-picture-in-picture-media-playback) to register an `enterpictureinpicture` handler and sets the `autopictureinpicture` attribute on videos. When you switch tabs away from a playing video, Chrome's built-in auto-PiP feature (enabled via the flag) automatically triggers PiP.

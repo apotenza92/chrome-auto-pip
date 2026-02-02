@@ -429,16 +429,15 @@
 
     async function loadPiPSettings() {
         try {
-            const result = await chrome.storage.sync.get(['pipSize', 'autoPipEnabled']);
+            const result = await chrome.storage.sync.get(['pipSize']);
             let local = {};
             try { local = await chrome.storage.local.get(['displayInfo']); } catch (_) { }
             return {
                 pipSize: normalizePipSize(result.pipSize || 25), // Default 25%
-                autoPipEnabled: result.autoPipEnabled !== false,
                 displayInfo: local.displayInfo || null
             };
         } catch (error) {
-            return { pipSize: 25, autoPipEnabled: true, displayInfo: null };
+            return { pipSize: 25, displayInfo: null };
         }
     }
 

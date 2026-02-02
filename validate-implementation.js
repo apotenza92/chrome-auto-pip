@@ -52,7 +52,7 @@ requiredFunctions.forEach(func => {
 });
 
 // Check options.html for pipSize dropdown
-console.log('\n⚙️  Checking options.html for pipSize dropdown:');
+console.log('\n⚙️  Checking options.html for settings UI:');
 const optionsContent = fs.readFileSync('options.html', 'utf8');
 if (optionsContent.includes('id="pipSize"')) {
     console.log('  ✅ pipSize dropdown found');
@@ -60,14 +60,31 @@ if (optionsContent.includes('id="pipSize"')) {
     console.log('  ❌ pipSize dropdown missing');
 }
 
+const toggleIds = ['autoPipOnTabSwitch', 'autoPipOnWindowSwitch', 'autoPipOnAppSwitch'];
+toggleIds.forEach(id => {
+    if (optionsContent.includes(`id="${id}"`)) {
+        console.log(`  ✅ ${id} toggle found`);
+    } else {
+        console.log(`  ❌ ${id} toggle missing`);
+    }
+});
+
 // Check options.js for pipSize handling
-console.log('\n🎛️  Checking options.js for pipSize handling:');
+console.log('\n🎛️  Checking options.js for settings handling:');
 const optionsJsContent = fs.readFileSync('options.js', 'utf8');
 if (optionsJsContent.includes('pipSize')) {
     console.log('  ✅ pipSize setting handling found');
 } else {
     console.log('  ❌ pipSize setting handling missing');
 }
+
+toggleIds.forEach(id => {
+    if (optionsJsContent.includes(id)) {
+        console.log(`  ✅ ${id} handling found`);
+    } else {
+        console.log(`  ❌ ${id} handling missing`);
+    }
+});
 
 // Check immediate-pip.js for Document PiP usage
 console.log('\n🎬 Checking immediate-pip.js for Document PiP usage:');
@@ -88,13 +105,21 @@ if (triggerPipContent.includes('requestDocumentPiP')) {
 }
 
 // Check main.js for pipSize settings
-console.log('\n🏠 Checking main.js for pipSize settings:');
+console.log('\n🏠 Checking main.js for settings:');
 const mainContent = fs.readFileSync('main.js', 'utf8');
 if (mainContent.includes('pipSize')) {
     console.log('  ✅ pipSize settings handling found');
 } else {
     console.log('  ❌ pipSize settings handling missing');
 }
+
+toggleIds.forEach(id => {
+    if (mainContent.includes(id)) {
+        console.log(`  ✅ ${id} handling found`);
+    } else {
+        console.log(`  ❌ ${id} handling missing`);
+    }
+});
 
 console.log('\n🎉 Validation complete!');
 console.log('\n📋 Implementation Summary:');

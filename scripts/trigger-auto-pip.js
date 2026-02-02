@@ -1,6 +1,6 @@
 // Trigger automatic PiP via MediaSession API (Chrome 134+)
 
-(function triggerAutoPiP() {
+(async function triggerAutoPiP() {
     'use strict';
 
     const DEBUG = true;
@@ -8,9 +8,68 @@
 
     log('trigger-auto-pip.js injected', { url: location.href, isChild: window.top !== window });
 
+    const getHostname = () => {
+        try {
+            return new URL(location.href).hostname.toLowerCase();
+        } catch (_) {
+            return null;
+        }
+    };
+
+    const isHostBlocked = (hostname, patterns) => {
+        if (!hostname || !Array.isArray(patterns)) return false;
+        for (let i = 0; i < patterns.length; i++) {
+            const pattern = patterns[i];
+            if (!pattern || typeof pattern !== 'string') continue;
+            if (pattern.startsWith('*.')) {
+                const suffix = pattern.slice(2);
+                if (!suffix) continue;
+                if (hostname === suffix || hostname.endsWith(`.${suffix}`)) return true;
+            } else {
+                if (hostname === pattern) return true;
+                if (hostname === `www.${pattern}`) return true;
+            }
+        }
+        return false;
+    };
+
+    const getBlocklist = async () => {
+        if (!chrome?.storage) return [];
+        const readStorage = (area) => new Promise(resolve => {
+            try {
+                area.get(['autoPipSiteBlocklist'], (data) => resolve(data?.autoPipSiteBlocklist));
+            } catch (_) {
+                resolve(null);
+            }
+        });
+
+        const local = await readStorage(chrome.storage.local);
+        if (Array.isArray(local)) return local;
+        const sync = await readStorage(chrome.storage.sync);
+        return Array.isArray(sync) ? sync : [];
+    };
+
+    const hostname = getHostname();
+    if (hostname) {
+        try {
+            const blocklist = await getBlocklist();
+            if (isHostBlocked(hostname, blocklist)) {
+                window.__auto_pip_blocked__ = true;
+            } else {
+                window.__auto_pip_blocked__ = false;
+            }
+        } catch (_) { }
+    }
+
     // Require MediaSession API
     if (!('mediaSession' in navigator)) {
         log('MediaSession API not supported');
+        return false;
+    }
+
+    // Respect blocked flag for per-site disables
+    if (window.__auto_pip_blocked__ === true) {
+        log('Auto-PiP blocked for this site, aborting');
         return false;
     }
 
@@ -25,7 +84,7 @@
 
     // Helper to check if auto-PiP is currently disabled
     function isDisabled() {
-        return window.__auto_pip_disabled__ === true;
+        return window.__auto_pip_disabled__ === true || window.__auto_pip_blocked__ === true;
     }
 
     // Get shared utilities (injected before this script)
@@ -60,6 +119,7 @@
             videos.forEach(v => {
                 if (!v.hasAttribute('autopictureinpicture')) {
                     v.setAttribute('autopictureinpicture', '');
+                    v.setAttribute('data-auto-pip-managed', '');
                     log('Added autopictureinpicture attribute to video');
                 }
             });
