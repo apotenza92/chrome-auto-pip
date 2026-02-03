@@ -3,8 +3,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const autoPipOnTabSwitchToggle = document.getElementById('autoPipOnTabSwitch');
     const autoPipOnWindowSwitchToggle = document.getElementById('autoPipOnWindowSwitch');
     const autoPipOnAppSwitchToggle = document.getElementById('autoPipOnAppSwitch');
-    const pipSizeSelect = document.getElementById('pipSize');
-    const pipSizeSetting = document.getElementById('pipSizeSetting');
     const currentSiteSelect = document.getElementById('currentSiteSelect');
     const addCurrentSiteButton = document.getElementById('addCurrentSite');
     const manualSiteInput = document.getElementById('manualSiteInput');
@@ -15,13 +13,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     autoPipOnTabSwitchToggle.disabled = true;
     autoPipOnWindowSwitchToggle.disabled = true;
     autoPipOnAppSwitchToggle.disabled = true;
-    pipSizeSelect.disabled = true;
     currentSiteSelect.disabled = true;
     addCurrentSiteButton.disabled = true;
     manualSiteInput.disabled = true;
     addManualSiteButton.disabled = true;
 
-    const allowedSizes = ['5', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55', '60', '65', '70', '75', '80'];
     const DEFAULT_BLOCKED_SITES = [
         'meet.google.com',
         '*.zoom.us',
@@ -32,12 +28,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         '*.discord.com'
     ];
     let blockedSites = DEFAULT_BLOCKED_SITES.slice();
-
-    function normalizePipSize(value) {
-        const parsed = parseInt(value, 10);
-        if (!Number.isFinite(parsed)) return 25;
-        return Math.min(80, Math.max(5, parsed));
-    }
 
     function normalizeHostEntry(value) {
         if (typeof value !== 'string') return null;
@@ -169,56 +159,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    function syncCustomSizeOption(size, customActive) {
-        const value = size.toString();
-        const existing = pipSizeSelect.querySelector('option[data-custom="true"]');
-        const shouldShowCustom = !!customActive || !allowedSizes.includes(value);
-
-        if (!shouldShowCustom) {
-            if (existing) {
-                existing.remove();
-            }
-            return null;
-        }
-
-        const label = 'Custom (manually resized)';
-        const customValue = `custom:${value}`;
-        if (existing) {
-            existing.value = customValue;
-            existing.textContent = label;
-            return existing;
-        }
-
-        const option = document.createElement('option');
-        option.value = customValue;
-        option.textContent = label;
-        option.dataset.custom = 'true';
-        pipSizeSelect.appendChild(option);
-        return option;
-    }
-
-    function applySizeSelection(size, customActive) {
-        const customOption = syncCustomSizeOption(size, customActive);
-        const value = size.toString();
-        const shouldShowCustom = !!customActive || !allowedSizes.includes(value);
-
-        if (shouldShowCustom && customOption) {
-            pipSizeSelect.value = customOption.value;
-        } else {
-            pipSizeSelect.value = value;
-        }
-    }
-
-    function getSelectedSize() {
-        const selectedOption = pipSizeSelect.options[pipSizeSelect.selectedIndex];
-        if (!selectedOption) return 25;
-        const isCustom = selectedOption.dataset.custom === 'true';
-        const rawValue = isCustom
-            ? selectedOption.value.replace('custom:', '')
-            : selectedOption.value;
-        return normalizePipSize(rawValue);
-    }
-
     async function migrateOldSettings(syncData, localData) {
         // Check if old autoPipEnabled exists and new settings don't
         const hasOldSetting = typeof syncData.autoPipEnabled === 'boolean';
@@ -253,7 +193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const local = await chrome.storage.local.get([
                 'autoPipOnTabSwitch', 'autoPipOnWindowSwitch', 'autoPipOnAppSwitch',
-                'autoPipEnabled', 'pipSize', 'pipSizeCustom', 'autoPipSiteBlocklist'
+                'autoPipEnabled', 'autoPipSiteBlocklist'
             ]);
             
             // Try to migrate if needed
@@ -277,11 +217,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 autoPipOnAppSwitchToggle.checked = typeof sync.autoPipOnAppSwitch === 'boolean' ? sync.autoPipOnAppSwitch : true;
             }
             
-            if (typeof local.pipSize === 'number') {
-                const size = normalizePipSize(local.pipSize);
-                applySizeSelection(size, local.pipSizeCustom === true);
-            }
-
             const localBlocklist = normalizeBlocklist(local.autoPipSiteBlocklist);
             if (localBlocklist) {
                 blockedSites = localBlocklist;
@@ -295,7 +230,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const result = await chrome.storage.sync.get([
                 'autoPipOnTabSwitch', 'autoPipOnWindowSwitch', 'autoPipOnAppSwitch',
-                'autoPipEnabled', 'pipSize', 'pipSizeCustom', 'autoPipSiteBlocklist'
+                'autoPipEnabled', 'autoPipSiteBlocklist'
             ]);
             
             // Try migration again if needed
@@ -312,10 +247,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 autoPipOnAppSwitchToggle.checked = typeof result.autoPipOnAppSwitch === 'boolean' ? result.autoPipOnAppSwitch : true;
             }
             
-            const size = normalizePipSize(result.pipSize || 25);
-            const customActive = result.pipSizeCustom === true;
-            applySizeSelection(size, customActive);
-
             const syncBlocklist = normalizeBlocklist(result.autoPipSiteBlocklist);
             const localBlocklist = normalizeBlocklist(blockedSites);
             const effectiveBlocklist = syncBlocklist || localBlocklist || DEFAULT_BLOCKED_SITES.slice();
@@ -334,9 +265,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     autoPipOnTabSwitch: autoPipOnTabSwitchToggle.checked,
                     autoPipOnWindowSwitch: autoPipOnWindowSwitchToggle.checked,
                     autoPipOnAppSwitch: autoPipOnAppSwitchToggle.checked,
-                    autoPipSiteBlocklist: blockedSites,
-                    pipSize: size, 
-                    pipSizeCustom: customActive 
+                    autoPipSiteBlocklist: blockedSites
                 }); 
             } catch (_) { }
         } catch (_) {
@@ -350,18 +279,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (autoPipOnAppSwitchToggle.checked !== true && autoPipOnAppSwitchToggle.checked !== false) {
                 autoPipOnAppSwitchToggle.checked = true;
             }
-            if (!pipSizeSelect.value) {
-                pipSizeSelect.value = '25';
-            }
             if (!blockedSites.length) {
                 blockedSites = DEFAULT_BLOCKED_SITES.slice();
                 renderBlockedSites();
             }
-        }
-
-        // Check if Document PiP is supported and hide size setting if not
-        if (!('documentPictureInPicture' in window)) {
-            pipSizeSetting.style.display = 'none';
         }
 
         renderBlockedSites();
@@ -372,49 +293,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     autoPipOnTabSwitchToggle.disabled = false;
     autoPipOnWindowSwitchToggle.disabled = false;
     autoPipOnAppSwitchToggle.disabled = false;
-    pipSizeSelect.disabled = false;
     setBlocklistControlsDisabled(false);
 
     async function saveSettings() {
         const tabSwitchEnabled = autoPipOnTabSwitchToggle.checked;
         const windowSwitchEnabled = autoPipOnWindowSwitchToggle.checked;
         const appSwitchEnabled = autoPipOnAppSwitchToggle.checked;
-        
-        const selectedOption = pipSizeSelect.options[pipSizeSelect.selectedIndex];
-        const customSelected = selectedOption && selectedOption.dataset.custom === 'true';
-        const selectedValue = selectedOption ? selectedOption.value : pipSizeSelect.value;
-        const rawSize = customSelected
-            ? parseInt(selectedValue.replace('custom:', ''), 10)
-            : parseInt(selectedValue, 10);
-        const size = normalizePipSize(rawSize);
-        const isPreset = allowedSizes.includes(size.toString());
-        const pipSizeCustom = customSelected || !isPreset;
-
-        applySizeSelection(size, pipSizeCustom);
 
         // Disable controls while saving
         autoPipOnTabSwitchToggle.disabled = true;
         autoPipOnWindowSwitchToggle.disabled = true;
         autoPipOnAppSwitchToggle.disabled = true;
-        pipSizeSelect.disabled = true;
 
         try {
             // Write to sync (authoritative)
             await chrome.storage.sync.set({ 
                 autoPipOnTabSwitch: tabSwitchEnabled,
                 autoPipOnWindowSwitch: windowSwitchEnabled,
-                autoPipOnAppSwitch: appSwitchEnabled,
-                pipSize: size, 
-                pipSizeCustom 
+                autoPipOnAppSwitch: appSwitchEnabled
             });
             // Mirror to local cache (best-effort)
             try { 
                 await chrome.storage.local.set({ 
                     autoPipOnTabSwitch: tabSwitchEnabled,
                     autoPipOnWindowSwitch: windowSwitchEnabled,
-                    autoPipOnAppSwitch: appSwitchEnabled,
-                    pipSize: size, 
-                    pipSizeCustom 
+                    autoPipOnAppSwitch: appSwitchEnabled
                 }); 
             } catch (_) { }
 
@@ -423,7 +326,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             autoPipOnTabSwitchToggle.disabled = false;
             autoPipOnWindowSwitchToggle.disabled = false;
             autoPipOnAppSwitchToggle.disabled = false;
-            pipSizeSelect.disabled = false;
         }
     }
 
@@ -431,7 +333,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     autoPipOnTabSwitchToggle.addEventListener('change', saveSettings);
     autoPipOnWindowSwitchToggle.addEventListener('change', saveSettings);
     autoPipOnAppSwitchToggle.addEventListener('change', saveSettings);
-    pipSizeSelect.addEventListener('change', saveSettings);
 
     addCurrentSiteButton.addEventListener('click', () => {
         const selected = currentSiteSelect.value;
@@ -462,8 +363,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         const tabSwitchChange = changes.autoPipOnTabSwitch ? changes.autoPipOnTabSwitch.newValue : undefined;
         const windowSwitchChange = changes.autoPipOnWindowSwitch ? changes.autoPipOnWindowSwitch.newValue : undefined;
         const appSwitchChange = changes.autoPipOnAppSwitch ? changes.autoPipOnAppSwitch.newValue : undefined;
-        const sizeChange = changes.pipSize ? changes.pipSize.newValue : undefined;
-        const customChange = changes.pipSizeCustom ? changes.pipSizeCustom.newValue : undefined;
 
         if (typeof tabSwitchChange === 'boolean') {
             autoPipOnTabSwitchToggle.checked = tabSwitchChange;
@@ -475,16 +374,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         if (typeof appSwitchChange === 'boolean') {
             autoPipOnAppSwitchToggle.checked = appSwitchChange;
-        }
-
-        if (typeof sizeChange === 'number' || typeof customChange === 'boolean') {
-            const size = normalizePipSize(
-                typeof sizeChange === 'number' ? sizeChange : getSelectedSize()
-            );
-            const customActive = typeof customChange === 'boolean'
-                ? customChange
-                : (pipSizeSelect.options[pipSizeSelect.selectedIndex]?.dataset.custom === 'true');
-            applySizeSelection(size, customActive);
         }
 
         if (changes.autoPipSiteBlocklist) {

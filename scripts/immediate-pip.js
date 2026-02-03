@@ -5,7 +5,7 @@
     'use strict';
 
     const utils = window.__auto_pip_utils__ || {};
-    const { findAllVideos, requestPiP, requestDocumentPiP, supportsDocumentPiP, exitPiP, loadPiPSettings, calculatePiPDimensions } = utils;
+    const { findAllVideos, requestPiP, exitPiP } = utils;
 
     // If PiP already active, exit it (toggle behavior)
     if (document.pictureInPictureElement) {
@@ -21,16 +21,10 @@
         }
     }
 
-    // Also check for local PiP markers
+    // Also check for local PiP marker
     const pipVideo = document.querySelector('[__pip__]');
     if (pipVideo) {
         pipVideo.removeAttribute('__pip__');
-        return 'toggled_off';
-    }
-
-    const docPipVideo = document.querySelector('[__document_pip__]');
-    if (docPipVideo) {
-        docPipVideo.removeAttribute('__document_pip__');
         return 'toggled_off';
     }
 
@@ -57,33 +51,7 @@
     if (videos.length === 0) return false;
 
     const video = videos[0];
-    
     try {
-        // Load settings for Document PiP
-        let settings = { pipSize: 25 };
-        if (loadPiPSettings) {
-            settings = await loadPiPSettings();
-        }
-
-        // Use Document PiP if supported and we have settings
-        if (supportsDocumentPiP && requestDocumentPiP && settings.pipSize) {
-            const intrinsicRatio = video.videoWidth && video.videoHeight
-                ? (video.videoWidth / video.videoHeight)
-                : null;
-            const rect = video.getBoundingClientRect();
-            const fallbackRatio = rect.width && rect.height ? (rect.width / rect.height) : null;
-            const aspectRatio = intrinsicRatio || fallbackRatio || (16 / 9);
-
-            const { width, height } = calculatePiPDimensions(
-                settings.pipSize,
-                aspectRatio,
-                settings.displayInfo
-            );
-            await requestDocumentPiP(video, { width, height, displayInfo: settings.displayInfo || null });
-            return true;
-        }
-
-        // Fallback to standard PiP
         if (requestPiP) {
             await requestPiP(video);
         } else {

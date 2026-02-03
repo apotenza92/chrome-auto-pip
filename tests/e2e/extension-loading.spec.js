@@ -6,5 +6,4 @@ test('options page shows auto switch toggles', async ({ page, extensionId }) => 
   await expect(page.locator('#autoPipOnTabSwitch')).toBeAttached();
   await expect(page.locator('#autoPipOnWindowSwitch')).toBeAttached();
   await expect(page.locator('#autoPipOnAppSwitch')).toBeAttached();
-  await expect(page.locator('#pipSize')).toBeAttached();
 });

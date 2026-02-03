@@ -45,8 +45,6 @@ Enjoying the extension?
 
 **Manual:** Click the extension icon to immediately activate PiP on the current video
 
-**PiP size:** Choose a default PiP window size in options; manual resize is remembered as a custom size
-
 **Disabled sites:** Auto-PiP is disabled on specific domains. You can add or remove domains in the Options page. Use a `*.` prefix to include subdomains (e.g. `*.zoom.us`).
 
 Default disabled sites:

@@ -23,7 +23,6 @@ var autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
 var log = []
 var settingsLoaded = false;
 var settingsReady = null;
-var displayInfo = null;
 
 function removeTabWithRetry(tabId, context, attempt = 0) {
   if (tabId == null) return;
@@ -217,7 +216,7 @@ function injectExitPiPScript(tabId, callback) {
 }
 
 function injectImmediatePiPScript(tabId, callback) {
-  injectWithUtils(tabId, ['./scripts/immediate-pip.js'], callback);
+  safeExecuteScript(tabId, ['./scripts/utils.js', './scripts/site-fixes.js', './scripts/immediate-pip.js'], callback, { allowBlocked: true });
 }
 
 function injectClearAutoPiPScript(tabId, callback) {
@@ -304,9 +303,7 @@ async function loadSettings() {
         'autoPipOnWindowSwitch',
         'autoPipOnAppSwitch',
         'autoPipEnabled',
-        'autoPipSiteBlocklist',
-        'pipSize',
-        'pipSizeCustom'
+        'autoPipSiteBlocklist'
       ]);
 
       const hasLocalNew =
@@ -343,9 +340,7 @@ async function loadSettings() {
         'autoPipOnWindowSwitch',
         'autoPipOnAppSwitch',
         'autoPipEnabled',
-        'autoPipSiteBlocklist',
-        'pipSize',
-        'pipSizeCustom'
+        'autoPipSiteBlocklist'
       ]);
 
     const migrated = await migrateAutoPipSettings(result);
@@ -370,16 +365,13 @@ async function loadSettings() {
         try { await chrome.storage.sync.set({ autoPipSiteBlocklist: effectiveBlocklist }); } catch (_) { }
       }
 
-    // pipSize doesn't need to be stored globally since content scripts read it directly
     // Mirror to local cache (best-effort)
       try {
         await chrome.storage.local.set({
           autoPipOnTabSwitch,
           autoPipOnWindowSwitch,
           autoPipOnAppSwitch,
-          autoPipSiteBlocklist,
-          pipSize: result.pipSize || 25,
-          pipSizeCustom: result.pipSizeCustom === true
+          autoPipSiteBlocklist
         });
       } catch (_) { }
   } catch (error) {
@@ -393,9 +385,7 @@ async function loadSettings() {
         autoPipOnTabSwitch,
         autoPipOnWindowSwitch,
         autoPipOnAppSwitch,
-        autoPipSiteBlocklist,
-        pipSize: 25,
-        pipSizeCustom: false
+        autoPipSiteBlocklist
       });
     } catch (_) { }
   } finally {
@@ -404,55 +394,18 @@ async function loadSettings() {
   }
 }
 
-// Load display info (native resolution if available)
-async function loadDisplayInfo() {
-  try {
-    if (!chrome.system || !chrome.system.display) return;
-
-    chrome.system.display.getInfo((displays) => {
-      if (!Array.isArray(displays) || displays.length === 0) return;
-
-      const primary = displays.find(d => d.isPrimary) || displays[0];
-      const nativeMode = Array.isArray(primary.modes)
-        ? primary.modes.find(m => m.isNative)
-        : null;
-
-      displayInfo = {
-        boundsWidth: primary.bounds?.width,
-        boundsHeight: primary.bounds?.height,
-        scaleFactor: primary.scaleFactor,
-        nativeWidth: nativeMode?.width || primary.bounds?.width,
-        nativeHeight: nativeMode?.height || primary.bounds?.height
-      };
-
-      try { chrome.storage.local.set({ displayInfo }); } catch (_) { }
-    });
-  } catch (_) {
-    // ignore
-  }
-}
-
 // Load settings on startup
 settingsReady = loadSettings();
-loadDisplayInfo();
 
 // Also refresh settings when the service worker wakes up with browser startup
 if (chrome.runtime && chrome.runtime.onStartup) {
   chrome.runtime.onStartup.addListener(() => {
     loadSettings();
-    loadDisplayInfo();
     // If tab switching is enabled, re-register handlers on all tabs at startup
     setTimeout(() => {
       if (!autoPipOnTabSwitch) return;
       registerAutoPipOnAllTabs();
     }, 300);
-  });
-}
-
-// Refresh display info on display changes
-if (chrome.system && chrome.system.display && chrome.system.display.onDisplayChanged) {
-  chrome.system.display.onDisplayChanged.addListener(() => {
-    loadDisplayInfo();
   });
 }
 
@@ -466,15 +419,23 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         autoPipOnTabSwitch: true,
         autoPipOnWindowSwitch: true,
         autoPipOnAppSwitch: true,
-        autoPipSiteBlocklist: DEFAULT_BLOCKED_SITES.slice(),
-        pipSize: 25,
-        pipSizeCustom: false
+        autoPipSiteBlocklist: DEFAULT_BLOCKED_SITES.slice()
       });
       autoPipOnTabSwitch = true;
       autoPipOnWindowSwitch = true;
       autoPipOnAppSwitch = true;
       autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
     } catch (error) { }
+    return;
+  }
+
+  if (details.reason === 'update') {
+    try {
+      await chrome.storage.sync.remove(['pipSize', 'pipSizeCustom', 'displayInfo']);
+    } catch (_) { }
+    try {
+      await chrome.storage.local.remove(['pipSize', 'pipSizeCustom', 'displayInfo']);
+    } catch (_) { }
   }
 });
 
@@ -563,37 +524,6 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       applyBlocklistToAllTabs();
     }
 
-    if (changes.pipSize) {
-      // Mirror pipSize to local cache
-      try { chrome.storage.local.set({ pipSize: changes.pipSize.newValue }); } catch (_) { }
-
-      const newSize = changes.pipSize.newValue;
-      if (Number.isFinite(newSize)) {
-        const displayInfoSnapshot = displayInfo || null;
-        chrome.tabs.query({}, (tabs) => {
-          if (!tabs) return;
-          tabs.forEach(tab => {
-            if (!isValidTab(tab)) return;
-            try {
-              chrome.tabs.sendMessage(tab.id, {
-                type: 'auto_pip_resize',
-                pipSize: newSize,
-                displayInfo: displayInfoSnapshot
-              }, () => {
-                if (chrome.runtime.lastError) {
-                  // ignore tabs without listener
-                }
-              });
-            } catch (_) { }
-          });
-        });
-      }
-    }
-
-    if (changes.pipSizeCustom) {
-      // Mirror pipSizeCustom to local cache
-      try { chrome.storage.local.set({ pipSizeCustom: changes.pipSizeCustom.newValue }); } catch (_) { }
-    }
   }
 });
 
@@ -611,47 +541,39 @@ function safeExecuteScript(tabId, files, callback, options = null) {
       return;
     }
 
-    const executeInTarget = (target) => {
-      chrome.scripting.executeScript({
-        target,
-        files: files
-      }, (results) => {
-        if (chrome.runtime.lastError) {
-          if (callback) callback(null);
-          return;
-        }
-        if (callback) callback(results);
-      });
-    };
-
     const runInjection = () => {
       if (!allowBlocked && !isAutoPipAllowedUrl(tab.url)) {
         if (callback) callback(null);
         return;
       }
 
-      if (chrome.webNavigation && chrome.webNavigation.getAllFrames) {
-        chrome.webNavigation.getAllFrames({ tabId }, (frames) => {
-          if (chrome.runtime.lastError || !Array.isArray(frames)) {
-            executeInTarget({ tabId: tabId, frameIds: [0] });
+      const execute = (target, onDone) => {
+        chrome.scripting.executeScript({
+          target,
+          files: files
+        }, (results) => {
+          if (chrome.runtime.lastError) {
+            onDone(null, chrome.runtime.lastError);
             return;
           }
+          onDone(results, null);
+        });
+      };
 
-          const frameIds = frames
-            .filter(frame => frame && frame.url && !isRestrictedUrl(frame.url))
-            .map(frame => frame.frameId);
+      execute({ tabId: tabId, allFrames: true }, (results, err) => {
+        if (!err) {
+          if (callback) callback(results);
+          return;
+        }
 
-          if (frameIds.length === 0) {
+        execute({ tabId: tabId, frameIds: [0] }, (fallbackResults, fallbackErr) => {
+          if (fallbackErr) {
             if (callback) callback(null);
             return;
           }
-
-          executeInTarget({ tabId: tabId, frameIds });
+          if (callback) callback(fallbackResults);
         });
-        return;
-      }
-
-      executeInTarget({ tabId: tabId, frameIds: [0] });
+      });
     };
 
     if (!allowBlocked && chrome.storage && chrome.storage.local) {
