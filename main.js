@@ -8,8 +8,8 @@ var blurFallbackOriginalTabId = null;
 var blurFallbackTempTabId = null;
 var pipActiveTab = null; // Track which tab has active PiP
 var autoPipOnTabSwitch = true; // Default to enabled
-var autoPipOnWindowSwitch = true; // Default to enabled
-var autoPipOnAppSwitch = true; // Default to enabled
+var autoPipOnWindowSwitch = false; // Default to disabled
+var autoPipOnAppSwitch = false; // Default to disabled
 const DEFAULT_BLOCKED_SITES = [
   'meet.google.com',
   '*.zoom.us',
@@ -346,15 +346,15 @@ async function loadSettings() {
     const migrated = await migrateAutoPipSettings(result);
     const effective = migrated || result;
 
-      autoPipOnTabSwitch = typeof effective.autoPipOnTabSwitch === 'boolean'
+    autoPipOnTabSwitch = typeof effective.autoPipOnTabSwitch === 'boolean'
         ? effective.autoPipOnTabSwitch
         : true;
     autoPipOnWindowSwitch = typeof effective.autoPipOnWindowSwitch === 'boolean'
       ? effective.autoPipOnWindowSwitch
-      : true;
+      : false;
       autoPipOnAppSwitch = typeof effective.autoPipOnAppSwitch === 'boolean'
         ? effective.autoPipOnAppSwitch
-        : true;
+        : false;
 
       const syncBlocklist = normalizeBlocklist(effective.autoPipSiteBlocklist);
       const localBlocklist = normalizeBlocklist(autoPipSiteBlocklist);
@@ -377,8 +377,8 @@ async function loadSettings() {
   } catch (error) {
     // If sync is unavailable, ensure we have a sensible default and cache it
     autoPipOnTabSwitch = true;
-    autoPipOnWindowSwitch = true;
-    autoPipOnAppSwitch = true;
+    autoPipOnWindowSwitch = false;
+    autoPipOnAppSwitch = false;
     autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
     try {
       await chrome.storage.local.set({
@@ -417,13 +417,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       await chrome.storage.local.clear();
       await chrome.storage.sync.set({
         autoPipOnTabSwitch: true,
-        autoPipOnWindowSwitch: true,
-        autoPipOnAppSwitch: true,
+        autoPipOnWindowSwitch: false,
+        autoPipOnAppSwitch: false,
         autoPipSiteBlocklist: DEFAULT_BLOCKED_SITES.slice()
       });
       autoPipOnTabSwitch = true;
-      autoPipOnWindowSwitch = true;
-      autoPipOnAppSwitch = true;
+      autoPipOnWindowSwitch = false;
+      autoPipOnAppSwitch = false;
       autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
     } catch (error) { }
     return;

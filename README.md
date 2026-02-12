@@ -41,11 +41,44 @@ Enjoying the extension?
 
 ## Usage
 
-**Automatic:** Switch tabs away from a video or switch to another window/app and it will automatically enter PiP
+### Default Automatic Behavior (Fresh Install)
+- `Auto PiP on Tab Switch`: **On**
+- `Auto PiP on Window Switch`: **Off**
+- `Auto PiP on App Switch`: **Off**
 
-**Manual:** Click the extension icon to immediately activate PiP on the current video
+With default settings, switching tabs away from a playing video will automatically enter PiP.
 
-**Disabled sites:** Auto-PiP is disabled on specific domains. You can add or remove domains in the Options page. Use a `*.` prefix to include subdomains (e.g. `*.zoom.us`).
+### Manual PiP
+Click the extension icon to immediately activate PiP on the current video
+
+### Open Extension Options
+1. Right-click the extension icon in the Chrome toolbar and click **Options**
+2. Or open `chrome://extensions`, open this extension's **Details**, and click **Extension options**
+
+Chrome docs reference: [Options page](https://developer.chrome.com/docs/extensions/develop/ui/options-page)
+
+### Window/App Switch Modes
+- If you enable **Auto PiP on Window Switch** or **Auto PiP on App Switch**, the extension will create temporary `about:blank` helper tabs by design.
+- This is required for how the current focus-change detection works when handling aggressive window/app switching behavior.
+- It can trigger in undesirable circumstances (for example, opening other extension popups) because Chrome reports browser focus loss as `WINDOW_ID_NONE` and does not reliably expose whether that focus change came from a popup/overlay.
+
+#### Why The Extension Works This Way
+- Tab switching is straightforward because Chrome gives direct tab activation events.
+- App/window switching is harder: extensions only get high-level focus changes from `chrome.windows.onFocusChanged`.
+- For app switches, Chrome can report `WINDOW_ID_NONE`, which means "Chrome lost focus", but it does not say *what* got focus instead.
+- To keep PiP behavior consistent in those modes, the extension creates a temporary `about:blank` helper tab to force a reliable focus transition path that Chrome can observe.
+
+#### Chrome Extension Limitations
+- There is no reliable API signal that says "this focus loss came from another extension popup/overlay."
+- Because of that, some interactions that are not true app switching can still look like app/window switching to the extension.
+- This is a platform-level limitation of the currently available extension focus APIs, not a site-specific bug.
+
+References:
+- [Chrome windows API](https://developer.chrome.com/docs/extensions/reference/api/windows)
+- [Auto PiP MediaSession behavior](https://developer.chrome.com/blog/automatic-picture-in-picture-media-playback)
+
+### Disabled Sites
+Auto-PiP is disabled on specific domains. You can add or remove domains in the Options page. Use a `*.` prefix to include subdomains (e.g. `*.zoom.us`).
 
 Default disabled sites:
 - `meet.google.com`
@@ -83,3 +116,20 @@ Most video sites work automatically, including:
 
 - Chrome 134+ or compatible Chromium browser
 - The `auto-picture-in-picture-for-video-playback` flag must be enabled
+
+## Store Description Copy
+
+Use this updated text for the Chrome Web Store long description:
+
+Automatically enables Picture-in-Picture when switching tabs, with one-click manual PiP from the toolbar icon.
+
+Default behavior for new installs:
+- Auto PiP on Tab Switch: On
+- Auto PiP on Window Switch: Off
+- Auto PiP on App Switch: Off
+
+Window Switch and App Switch modes are available in Extension Options as opt-in aggressive modes.
+
+Important: when Window Switch or App Switch is enabled, the extension will create temporary `about:blank` helper tabs by design. This is required so focus transitions can be detected reliably for those modes.
+
+In some undesirable circumstances (for example opening other extension popups), this behavior can still trigger because Chrome reports browser focus loss as `WINDOW_ID_NONE` and does not reliably identify popup sources to extensions.

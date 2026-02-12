@@ -27,6 +27,10 @@ async function setToggle(page, id, value) {
 test('settings update sync storage and persist', async ({ page, extensionId }) => {
   await page.goto(`chrome-extension://${extensionId}/options.html`);
 
+  await expect(page.locator('#autoPipOnTabSwitch')).toBeChecked();
+  await expect(page.locator('#autoPipOnWindowSwitch')).not.toBeChecked();
+  await expect(page.locator('#autoPipOnAppSwitch')).not.toBeChecked();
+
   await setToggle(page, 'autoPipOnTabSwitch', false);
   await setToggle(page, 'autoPipOnWindowSwitch', true);
   await setToggle(page, 'autoPipOnAppSwitch', false);

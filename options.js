@@ -211,10 +211,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 autoPipOnWindowSwitchToggle.checked = migrated.autoPipOnWindowSwitch;
                 autoPipOnAppSwitchToggle.checked = migrated.autoPipOnAppSwitch;
             } else {
-                // Default to true if not set
+                // Defaults for fresh installs: tab switch on, window/app switch off
                 autoPipOnTabSwitchToggle.checked = typeof sync.autoPipOnTabSwitch === 'boolean' ? sync.autoPipOnTabSwitch : true;
-                autoPipOnWindowSwitchToggle.checked = typeof sync.autoPipOnWindowSwitch === 'boolean' ? sync.autoPipOnWindowSwitch : true;
-                autoPipOnAppSwitchToggle.checked = typeof sync.autoPipOnAppSwitch === 'boolean' ? sync.autoPipOnAppSwitch : true;
+                autoPipOnWindowSwitchToggle.checked = typeof sync.autoPipOnWindowSwitch === 'boolean' ? sync.autoPipOnWindowSwitch : false;
+                autoPipOnAppSwitchToggle.checked = typeof sync.autoPipOnAppSwitch === 'boolean' ? sync.autoPipOnAppSwitch : false;
             }
             
             const localBlocklist = normalizeBlocklist(local.autoPipSiteBlocklist);
@@ -241,10 +241,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 autoPipOnWindowSwitchToggle.checked = migrated.autoPipOnWindowSwitch;
                 autoPipOnAppSwitchToggle.checked = migrated.autoPipOnAppSwitch;
             } else {
-                // Default to true if not set
+                // Defaults for fresh installs: tab switch on, window/app switch off
                 autoPipOnTabSwitchToggle.checked = typeof result.autoPipOnTabSwitch === 'boolean' ? result.autoPipOnTabSwitch : true;
-                autoPipOnWindowSwitchToggle.checked = typeof result.autoPipOnWindowSwitch === 'boolean' ? result.autoPipOnWindowSwitch : true;
-                autoPipOnAppSwitchToggle.checked = typeof result.autoPipOnAppSwitch === 'boolean' ? result.autoPipOnAppSwitch : true;
+                autoPipOnWindowSwitchToggle.checked = typeof result.autoPipOnWindowSwitch === 'boolean' ? result.autoPipOnWindowSwitch : false;
+                autoPipOnAppSwitchToggle.checked = typeof result.autoPipOnAppSwitch === 'boolean' ? result.autoPipOnAppSwitch : false;
             }
             
             const syncBlocklist = normalizeBlocklist(result.autoPipSiteBlocklist);
@@ -274,10 +274,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 autoPipOnTabSwitchToggle.checked = true;
             }
             if (autoPipOnWindowSwitchToggle.checked !== true && autoPipOnWindowSwitchToggle.checked !== false) {
-                autoPipOnWindowSwitchToggle.checked = true;
+                autoPipOnWindowSwitchToggle.checked = false;
             }
             if (autoPipOnAppSwitchToggle.checked !== true && autoPipOnAppSwitchToggle.checked !== false) {
-                autoPipOnAppSwitchToggle.checked = true;
+                autoPipOnAppSwitchToggle.checked = false;
             }
             if (!blockedSites.length) {
                 blockedSites = DEFAULT_BLOCKED_SITES.slice();
