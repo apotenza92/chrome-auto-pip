@@ -1,6 +1,6 @@
 {
   "name": "Automatic Picture-in-Picture (PiP)",
-  "description": "Automatically enables Picture-in-Picture when switching tabs. Window/app switch modes are optional in Extension Options.",
+  "description": "Auto Picture-in-Picture when you switch tabs like Arc and Firefox. Includes one-click PiP and optional window/app switch modes.",
   "version": "1.6.2",
   "manifest_version": 3,
   "icons": {
