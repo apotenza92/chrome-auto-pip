@@ -30,16 +30,15 @@ Enjoying the extension?
    
    [Chrome Web Store](https://chromewebstore.google.com/detail/automatic-picture-in-pict/dmjccoaplbldlhhljlcldhaciadfhkcj)
    
-   **Option B: Manual Installation from GitHub**
-   
-   1. Click the **Code** button on this GitHub repository
-   2. Select **Download ZIP**
-   3. Extract the downloaded ZIP file to a folder on your computer
-   4. Open your browser and go to `about://extensions`
-   5. Enable **Developer mode** (toggle switch in the top right)
-   6. Click **Load unpacked** button
-   7. Select the extracted folder containing the extension files
-   8. The extension should now appear in your extensions list and toolbar
+   **Option B: Manual Installation (GitHub Release ZIP)**
+
+   1. Download the latest release ZIP from: https://github.com/apotenza92/chrome-auto-pip/releases
+   2. Extract/unzip the downloaded file to a folder on your computer
+   3. Open Chrome and go to `chrome://extensions` (or `brave://extensions` / `edge://extensions`)
+   4. Enable **Developer mode** (toggle in the top right)
+   5. Click **Load unpacked**
+   6. Select the extracted folder (the one that contains `manifest.json`)
+   7. The extension should now appear in your extensions list and toolbar
 
 ## Usage
 

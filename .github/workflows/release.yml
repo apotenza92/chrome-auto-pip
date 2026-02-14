@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify manifest version matches tag
+        shell: bash
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          MANIFEST_VERSION=$(jq -r .version manifest.json)
+          echo "Tag version:      $VERSION"
+          echo "Manifest version: $MANIFEST_VERSION"
+          if [ "$VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "ERROR: Tag version does not match manifest.json version"
+            exit 1
+          fi
+
+      - name: Build release zip
+        shell: bash
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          NAME="chrome-auto-pip-${VERSION}"
+
+          rm -rf dist
+          mkdir -p "dist/${NAME}"
+
+          # Copy only the extension runtime files needed for "Load unpacked"
+          cp manifest.json main.js options.html options.js PRIVACY.md "dist/${NAME}/"
+          cp -R assets scripts "dist/${NAME}/"
+
+          # Optional docs
+          if [ -f README.md ]; then cp README.md "dist/${NAME}/"; fi
+          if [ -f CHANGELOG.md ]; then cp CHANGELOG.md "dist/${NAME}/"; fi
+
+          (cd dist && zip -r "../${NAME}.zip" "${NAME}")
+          ls -la "${NAME}.zip"
+
+      - name: Create GitHub Release and upload zip
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            chrome-auto-pip-${{ steps.version.outputs.version }}.zip
