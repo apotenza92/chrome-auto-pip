@@ -1,0 +1,154 @@
+name: Backfill GitHub Releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Comma-separated versions to backfill (e.g. 1.6.2,1.6.1). Leave empty for all versions found in CHANGELOG.md'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Backfill releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f CHANGELOG.md ]; then
+            echo "ERROR: CHANGELOG.md not found"
+            exit 1
+          fi
+
+          # Get versions from CHANGELOG headings: ## [x.y.z] - YYYY-MM-DD
+          mapfile -t ALL_VERSIONS < <(awk '
+            /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ {
+              line=$0
+              sub(/^## \[/, "", line)
+              sub(/\].*$/, "", line)
+              print line
+            }
+          ' CHANGELOG.md)
+
+          INPUT="${{ inputs.versions }}"
+          if [ -n "${INPUT}" ]; then
+            # Normalize into array
+            IFS=',' read -r -a VERSIONS <<< "${INPUT}"
+          else
+            VERSIONS=("${ALL_VERSIONS[@]}")
+          fi
+
+          echo "Versions to process: ${VERSIONS[*]}"
+
+          # Finds the first commit (from newest backwards) whose manifest.json has .version == requested version.
+          # This works even if the version didn't change in that commit, as long as that version existed at some point.
+          find_commit_for_version() {
+            local version="$1"
+            local commit
+            while read -r commit; do
+              local mv
+              mv=$(git show "${commit}:manifest.json" | jq -r .version 2>/dev/null || echo "")
+              if [ "${mv}" = "${version}" ]; then
+                echo "${commit}"
+                return 0
+              fi
+            done < <(git rev-list --all -- manifest.json)
+            return 1
+          }
+
+          extract_notes() {
+            local version="$1"
+            local out="$2"
+            awk -v ver="$version" '
+              BEGIN { found = 0 }
+              $0 ~ "^## \\[" ver "\\]" { found = 1; print; next }
+              found && $0 ~ "^## \\" { exit }
+              found { print }
+            ' CHANGELOG.md > "$out"
+
+            if [ ! -s "$out" ]; then
+              echo "## [${version}]" > "$out"
+              echo "" >> "$out"
+              echo "(No changelog section found.)" >> "$out"
+            fi
+
+            echo "" >> "$out"
+            echo "---" >> "$out"
+            echo "Full changelog: https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md" >> "$out"
+          }
+
+          build_zip_from_commit() {
+            local version="$1"
+            local commit="$2"
+            local name="chrome-auto-pip-${version}"
+            local zipfile="${name}.zip"
+
+            rm -rf dist "wt-${version}"
+            mkdir -p "dist/${name}"
+
+            git worktree add --force "wt-${version}" "${commit}" > /dev/null
+
+            # Copy only the extension runtime files needed for "Load unpacked"
+            cp "wt-${version}/manifest.json" "wt-${version}/main.js" "wt-${version}/options.html" "wt-${version}/options.js" "wt-${version}/PRIVACY.md" "dist/${name}/"
+            cp -R "wt-${version}/assets" "wt-${version}/scripts" "dist/${name}/"
+
+            # Always include the latest CHANGELOG/README from main branch (not necessarily present in old commits)
+            cp README.md "dist/${name}/" || true
+            cp CHANGELOG.md "dist/${name}/" || true
+
+            (cd dist && zip -r "../${zipfile}" "${name}" > /dev/null)
+
+            git worktree remove --force "wt-${version}" > /dev/null
+
+            echo "${zipfile}"
+          }
+
+          for version in "${VERSIONS[@]}"; do
+            version=$(echo "$version" | xargs)
+            if [ -z "$version" ]; then
+              continue
+            fi
+
+            tag="v${version}"
+
+            echo "---"
+            echo "Processing ${tag}"
+
+            commit=$(find_commit_for_version "$version" || true)
+            if [ -z "${commit}" ]; then
+              echo "ERROR: Could not find commit for version ${version}"
+              exit 1
+            fi
+
+            echo "Using commit ${commit} for ${tag}"
+
+            notes_file="release-notes-${version}.md"
+            extract_notes "$version" "$notes_file"
+
+            zipfile=$(build_zip_from_commit "$version" "$commit")
+
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release exists. Updating notes + uploading asset..."
+              gh release edit "$tag" --title "$tag" --notes-file "$notes_file"
+            else
+              echo "Creating release..."
+              gh release create "$tag" --target "$commit" --title "$tag" --notes-file "$notes_file"
+            fi
+
+            gh release upload "$tag" "$zipfile" --clobber
+          done
+
+          echo "Done."

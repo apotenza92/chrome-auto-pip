@@ -52,3 +52,12 @@ git push origin v1.6.3
 ```
 
 After the workflow finishes, the release page will contain `chrome-auto-pip-<version>.zip`.
+
+### Backfill/update existing GitHub Releases
+
+If older versions don't have GitHub Releases (or the release body needs to be updated to match `CHANGELOG.md`), run the workflow:
+
+- Actions → **Backfill GitHub Releases** → Run workflow
+- Optional input: `versions` as a comma-separated list (e.g. `1.6.2,1.6.1`). Leave blank to process all versions in `CHANGELOG.md`.
+
+This will create/update releases and upload the matching ZIP assets.
