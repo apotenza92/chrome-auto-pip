@@ -29,8 +29,9 @@ This project publishes a downloadable ZIP asset on GitHub Releases so users can 
 - The workflow:
   1. Derives the version from the tag.
   2. Verifies `manifest.json` `version` matches the tag version.
-  3. Builds `chrome-auto-pip-<version>.zip` containing the extension runtime files.
-  4. Creates/updates the GitHub Release and uploads the ZIP as a release asset.
+  3. Extracts the matching section from `CHANGELOG.md` and uses it as the GitHub Release notes.
+  4. Builds `chrome-auto-pip-<version>.zip` containing the extension runtime files.
+  5. Creates/updates the GitHub Release and uploads the ZIP as a release asset.
 
 ### Publish a release
 

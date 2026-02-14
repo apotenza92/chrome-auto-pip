@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.6.3)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,13 +21,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # On manual runs we need to explicitly checkout the tag
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - name: Derive version from tag
         id: version
         shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
           VERSION="${TAG#v}"
+
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -36,6 +52,32 @@ jobs:
             echo "ERROR: Tag version does not match manifest.json version"
             exit 1
           fi
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          NOTES_FILE="release-notes.md"
+
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="$VERSION" '
+              BEGIN { found = 0 }
+              $0 ~ "^## \\[" ver "\\]" { found = 1; print; next }
+              found && $0 ~ "^## \\" { exit }
+              found { print }
+            ' CHANGELOG.md > "$NOTES_FILE"
+          else
+            echo "Release ${VERSION}" > "$NOTES_FILE"
+          fi
+
+          echo "" >> "$NOTES_FILE"
+          echo "---" >> "$NOTES_FILE"
+          echo "Full changelog: https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md" >> "$NOTES_FILE"
+
+          echo "notes<<'EOF'" >> "$GITHUB_OUTPUT"
+          cat "$NOTES_FILE" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Build release zip
         shell: bash
@@ -62,6 +104,6 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
+          body: ${{ steps.notes.outputs.notes }}
           files: |
             chrome-auto-pip-${{ steps.version.outputs.version }}.zip
