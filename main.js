@@ -2,7 +2,19 @@ var currentTab = 0;
 var prevTab = null;
 var targetTab = null;
 var targetWindowId = null;
+
+// Track last focus-change events.
+// Note: Chrome may report WINDOW_ID_NONE for transient focus changes (e.g. extension UI)
+// so we also keep a "best known" normal window id.
 var lastFocusedWindowId = null;
+var lastFocusedNormalWindowId = null;
+
+// about:blank helper tab management (used for window/app switch modes)
+const FALLBACK_HELPER_URL = 'about:blank#chrome-auto-pip-helper';
+const APP_SWITCH_DEBOUNCE_MS = 250;
+var pendingAppSwitchTimer = null;
+var pendingAppSwitchFromWindowId = null;
+
 var blurFallbackWindowId = null;
 var blurFallbackOriginalTabId = null;
 var blurFallbackTempTabId = null;
@@ -32,7 +44,7 @@ function removeTabWithRetry(tabId, context, attempt = 0) {
       const message = chrome.runtime.lastError.message || '';
 
       const isBusy = message.includes('Tabs cannot be edited right now');
-      if (isBusy && attempt < 5) {
+      if (isBusy && attempt < 12) {
         setTimeout(() => {
           removeTabWithRetry(tabId, context, attempt + 1);
         }, 150 * (attempt + 1));
@@ -160,6 +172,49 @@ function clearBlurFallback() {
   blurFallbackTempTabId = null;
 }
 
+function cancelPendingAppSwitch() {
+  if (pendingAppSwitchTimer != null) {
+    clearTimeout(pendingAppSwitchTimer);
+  }
+  pendingAppSwitchTimer = null;
+  pendingAppSwitchFromWindowId = null;
+}
+
+function cleanupFocusedHelperTab(windowId) {
+  if (windowId == null) return;
+  const isNone = chrome.windows && chrome.windows.WINDOW_ID_NONE;
+  if (windowId === isNone) return;
+
+  chrome.tabs.query({ active: true, windowId }, (tabs) => {
+    const activeTab = tabs && tabs.length > 0 ? tabs[0] : null;
+    if (!activeTab || !activeTab.id) return;
+    if (activeTab.url !== FALLBACK_HELPER_URL) return;
+    removeTabWithRetry(activeTab.id, 'helperTabCleanup');
+  });
+}
+
+function scheduleDebouncedAppSwitch(fromWindowId, handler) {
+  if (fromWindowId == null) return;
+  const isNone = chrome.windows.WINDOW_ID_NONE;
+  if (fromWindowId === isNone) return;
+
+  // Debounce to avoid false positives when Chrome briefly reports WINDOW_ID_NONE
+  // (e.g. some extension popups/overlays, omnibox UI transitions, etc.).
+  cancelPendingAppSwitch();
+  pendingAppSwitchFromWindowId = fromWindowId;
+
+  pendingAppSwitchTimer = setTimeout(() => {
+    pendingAppSwitchTimer = null;
+
+    const stillNone = lastFocusedWindowId === chrome.windows.WINDOW_ID_NONE;
+    const effectiveFromWindowId = pendingAppSwitchFromWindowId;
+    pendingAppSwitchFromWindowId = null;
+
+    if (!stillNone) return;
+    handler(effectiveFromWindowId);
+  }, APP_SWITCH_DEBOUNCE_MS);
+}
+
 function activateFallbackTab(windowId, originalTabId) {
   if (windowId == null || originalTabId == null) return;
 
@@ -172,7 +227,7 @@ function activateFallbackTab(windowId, originalTabId) {
       blurFallbackTempTabId = null;
     }
 
-    const createOptions = { windowId, url: 'about:blank', active: true };
+    const createOptions = { windowId, url: FALLBACK_HELPER_URL, active: true };
     if (typeof index === 'number') {
       createOptions.index = index;
     }
@@ -789,14 +844,75 @@ if (typeof chrome !== 'undefined' && chrome.windows) {
   chrome.windows.getLastFocused({}, (window) => {
     if (!chrome.runtime.lastError && window) {
       lastFocusedWindowId = window.id;
+      // Best-effort initial "normal" window tracking
+      lastFocusedNormalWindowId = window.type === 'normal' ? window.id : window.id;
     }
   });
 
+  function handleWindowLostFocus(fromWindowId) {
+    const isNone = chrome.windows.WINDOW_ID_NONE;
+    if (fromWindowId == null || fromWindowId === isNone) return;
+
+    chrome.tabs.query({ active: true, windowId: fromWindowId }, (tabs) => {
+      if (!tabs || tabs.length === 0) return;
+      const activeTab = tabs[0];
+      if (!isValidTab(activeTab)) return;
+      if (!isAutoPipAllowedTab(activeTab)) {
+        injectDisableAutoPiPScript(activeTab.id, () => { });
+        if (targetTab === activeTab.id) {
+          setTargetTab(null);
+        }
+        if (pipActiveTab === activeTab.id) {
+          pipActiveTab = null;
+        }
+        return;
+      }
+      if (targetTab && activeTab.id !== targetTab) return;
+
+      injectCheckPlayingScript(activeTab.id, (results) => {
+        const isPlaying = hasAnyFrameTrue(results);
+        if (!isPlaying) return;
+
+        if (targetTab == null) {
+          setTargetTab(activeTab.id);
+        }
+
+        injectTriggerAutoPiP(activeTab.id, () => {
+          pipActiveTab = targetTab || activeTab.id;
+          activateFallbackTab(fromWindowId, activeTab.id);
+        });
+      });
+    });
+  }
+
   function handleWindowFocusChanged(windowId) {
+    const isNone = chrome.windows.WINDOW_ID_NONE;
+
     const previousWindowId = lastFocusedWindowId;
+    const previousNormalWindowId = lastFocusedNormalWindowId;
     lastFocusedWindowId = windowId;
 
-    const isNone = chrome.windows.WINDOW_ID_NONE;
+    // If focus moved back to a Chrome window, cancel any pending app-switch debounce.
+    if (windowId !== isNone) {
+      cancelPendingAppSwitch();
+
+      // Track "normal" windows so app-switch can fall back to a real browser window
+      // if focus temporarily moved through a non-normal window.
+      chrome.windows.get(windowId, {}, (win) => {
+        if (chrome.runtime.lastError || !win) return;
+        if (win.type === 'normal') {
+          lastFocusedNormalWindowId = win.id;
+        }
+      });
+
+      // If the service worker restarted and lost blurFallback* state, the helper tab can
+      // become orphaned. Clean it up when the window regains focus.
+      const hasTrackedFallback = blurFallbackWindowId === windowId && blurFallbackTempTabId != null;
+      if (!hasTrackedFallback) {
+        cleanupFocusedHelperTab(windowId);
+      }
+    }
+
     if (previousWindowId === isNone && windowId === isNone) {
       return;
     }
@@ -808,41 +924,23 @@ if (typeof chrome !== 'undefined' && chrome.windows) {
       previousWindowId !== isNone &&
       windowId !== isNone &&
       windowId !== previousWindowId;
-    const shouldHandleAppSwitch = movedToNone && autoPipOnAppSwitch;
-    const shouldHandleWindowSwitch = movedToWindow && autoPipOnWindowSwitch;
-    const windowLostFocus = !returningFromNone && (shouldHandleAppSwitch || shouldHandleWindowSwitch);
 
-    if (windowLostFocus) {
-      chrome.tabs.query({ active: true, windowId: previousWindowId }, (tabs) => {
-        if (!tabs || tabs.length === 0) return;
-        const activeTab = tabs[0];
-        if (!isValidTab(activeTab)) return;
-        if (!isAutoPipAllowedTab(activeTab)) {
-          injectDisableAutoPiPScript(activeTab.id, () => { });
-          if (targetTab === activeTab.id) {
-            setTargetTab(null);
-          }
-          if (pipActiveTab === activeTab.id) {
-            pipActiveTab = null;
-          }
-          return;
-        }
-        if (targetTab && activeTab.id !== targetTab) return;
+    // Best-effort focus-loss handling
+    if (!returningFromNone) {
+      if (movedToNone && autoPipOnAppSwitch) {
+        const fromWindowId =
+          previousNormalWindowId != null && previousNormalWindowId !== isNone
+            ? previousNormalWindowId
+            : previousWindowId;
 
-        injectCheckPlayingScript(activeTab.id, (results) => {
-          const isPlaying = hasAnyFrameTrue(results);
-          if (!isPlaying) return;
+        scheduleDebouncedAppSwitch(fromWindowId, handleWindowLostFocus);
+      }
 
-          if (targetTab == null) {
-            setTargetTab(activeTab.id);
-          }
-
-          injectTriggerAutoPiP(activeTab.id, () => {
-            pipActiveTab = targetTab || activeTab.id;
-            activateFallbackTab(previousWindowId, activeTab.id);
-          });
-        });
-      });
+      if (movedToWindow && autoPipOnWindowSwitch) {
+        // Note: windowId can refer to various window types (normal/popup/etc). For now we
+        // treat any real window-to-window focus change as eligible.
+        handleWindowLostFocus(previousWindowId);
+      }
     }
 
     const returningToTargetWindow = targetTab != null && windowId === targetWindowId && pipActiveTab === targetTab;

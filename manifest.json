@@ -1,7 +1,7 @@
 {
   "name": "Automatic Picture-in-Picture (PiP)",
   "description": "Auto Picture-in-Picture when you switch tabs like Arc and Firefox. Includes one-click PiP and optional window/app switch modes.",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "manifest_version": 3,
   "icons": {
     "128": "assets/icon.png"

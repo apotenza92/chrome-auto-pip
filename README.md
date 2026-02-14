@@ -4,6 +4,8 @@
 
 Free and open source.
 
+Changelog: [CHANGELOG.md](CHANGELOG.md)
+
 Automatically enables Picture-in-Picture when switching tabs like Arc or Firefox or Zen.
 
 Also enables Picture-in-Picture when switching windows or applications.
