@@ -75,7 +75,7 @@ jobs:
             awk -v ver="$version" '
               BEGIN { found = 0 }
               $0 ~ "^## \\[" ver "\\]" { found = 1; print; next }
-              found && $0 ~ "^## \\" { exit }
+              found && $0 ~ "^## \\[[0-9]+\\.[0-9]+\\.[0-9]+\\]" { exit }
               found { print }
             ' CHANGELOG.md > "$out"
 
