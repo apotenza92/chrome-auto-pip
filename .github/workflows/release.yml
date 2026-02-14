@@ -75,7 +75,7 @@ jobs:
           echo "---" >> "$NOTES_FILE"
           echo "Full changelog: https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md" >> "$NOTES_FILE"
 
-          echo "notes<<'EOF'" >> "$GITHUB_OUTPUT"
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
           cat "$NOTES_FILE" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
