@@ -1,22 +1,10 @@
-// Options page JavaScript
 document.addEventListener('DOMContentLoaded', async () => {
     const autoPipOnTabSwitchToggle = document.getElementById('autoPipOnTabSwitch');
-    const autoPipOnWindowSwitchToggle = document.getElementById('autoPipOnWindowSwitch');
-    const autoPipOnAppSwitchToggle = document.getElementById('autoPipOnAppSwitch');
     const currentSiteSelect = document.getElementById('currentSiteSelect');
     const addCurrentSiteButton = document.getElementById('addCurrentSite');
     const manualSiteInput = document.getElementById('manualSiteInput');
     const addManualSiteButton = document.getElementById('addManualSite');
     const blockedSitesList = document.getElementById('blockedSitesList');
-
-    // Prevent user interaction until we load
-    autoPipOnTabSwitchToggle.disabled = true;
-    autoPipOnWindowSwitchToggle.disabled = true;
-    autoPipOnAppSwitchToggle.disabled = true;
-    currentSiteSelect.disabled = true;
-    addCurrentSiteButton.disabled = true;
-    manualSiteInput.disabled = true;
-    addManualSiteButton.disabled = true;
 
     const DEFAULT_BLOCKED_SITES = [
         'meet.google.com',
@@ -27,7 +15,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         '*.slack.com',
         '*.discord.com'
     ];
+
     let blockedSites = DEFAULT_BLOCKED_SITES.slice();
+
+    autoPipOnTabSwitchToggle.disabled = true;
+    setBlocklistControlsDisabled(true);
 
     function normalizeHostEntry(value) {
         if (typeof value !== 'string') return null;
@@ -90,8 +82,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        const sorted = sortBlocklist(blockedSites);
-        sorted.forEach((site) => {
+        sortBlocklist(blockedSites).forEach((site) => {
             const row = document.createElement('div');
             row.className = 'site-item';
 
@@ -102,8 +93,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             removeButton.className = 'button button-small';
             removeButton.textContent = 'Remove';
             removeButton.addEventListener('click', () => {
-                const next = blockedSites.filter((entry) => entry !== site);
-                saveBlocklist(next);
+                saveBlocklist(blockedSites.filter((entry) => entry !== site));
             });
 
             row.appendChild(label);
@@ -114,7 +104,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function isRestrictedUrl(url) {
         if (!url) return true;
-        const restrictedProtocols = ['chrome:', 'chrome-extension:', 'chrome-search:', 'chrome-devtools:', 'moz-extension:', 'edge:', 'about:'];
+        const restrictedProtocols = [
+            'chrome:',
+            'chrome-extension:',
+            'chrome-search:',
+            'chrome-devtools:',
+            'moz-extension:',
+            'edge:',
+            'about:'
+        ];
         return restrictedProtocols.some(protocol => url.startsWith(protocol));
     }
 
@@ -133,15 +131,109 @@ document.addEventListener('DOMContentLoaded', async () => {
                 } catch (_) { }
             });
 
-            const sortedHosts = Array.from(hosts).sort((a, b) => a.localeCompare(b));
             currentSiteSelect.innerHTML = '<option value="">Select a site</option>';
-            sortedHosts.forEach((host) => {
+            Array.from(hosts).sort((a, b) => a.localeCompare(b)).forEach((host) => {
                 const option = document.createElement('option');
                 option.value = host;
                 option.textContent = host;
                 currentSiteSelect.appendChild(option);
             });
+        } catch (_) { }
+    }
+
+    async function migrateOldSettings(syncData) {
+        if (typeof syncData.autoPipEnabled !== 'boolean') return null;
+        if (typeof syncData.autoPipOnTabSwitch === 'boolean') return null;
+
+        const migration = { autoPipOnTabSwitch: syncData.autoPipEnabled };
+        try {
+            await chrome.storage.sync.set(migration);
+            await chrome.storage.local.set(migration);
+            return migration;
         } catch (_) {
+            return null;
+        }
+    }
+
+    async function loadSettingsWithFallback() {
+        let localBlocklist = null;
+
+        try {
+            const local = await chrome.storage.local.get([
+                'autoPipOnTabSwitch',
+                'autoPipEnabled',
+                'autoPipSiteBlocklist'
+            ]);
+
+            if (typeof local.autoPipOnTabSwitch === 'boolean') {
+                autoPipOnTabSwitchToggle.checked = local.autoPipOnTabSwitch;
+            } else if (typeof local.autoPipEnabled === 'boolean') {
+                autoPipOnTabSwitchToggle.checked = local.autoPipEnabled;
+            }
+
+            localBlocklist = normalizeBlocklist(local.autoPipSiteBlocklist);
+            if (localBlocklist) {
+                blockedSites = localBlocklist;
+                renderBlockedSites();
+            }
+        } catch (_) { }
+
+        try {
+            const result = await chrome.storage.sync.get([
+                'autoPipOnTabSwitch',
+                'autoPipEnabled',
+                'autoPipSiteBlocklist'
+            ]);
+
+            const migrated = await migrateOldSettings(result);
+            const effective = migrated || result;
+
+            autoPipOnTabSwitchToggle.checked =
+                typeof effective.autoPipOnTabSwitch === 'boolean'
+                    ? effective.autoPipOnTabSwitch
+                    : true;
+
+            const syncBlocklist = normalizeBlocklist(effective.autoPipSiteBlocklist);
+            const effectiveBlocklist = syncBlocklist || localBlocklist || DEFAULT_BLOCKED_SITES.slice();
+            blockedSites = effectiveBlocklist;
+
+            if (!syncBlocklist) {
+                try {
+                    await chrome.storage.sync.set({ autoPipSiteBlocklist: effectiveBlocklist });
+                } catch (_) { }
+            }
+
+            try {
+                await chrome.storage.local.set({
+                    autoPipOnTabSwitch: autoPipOnTabSwitchToggle.checked,
+                    autoPipSiteBlocklist: blockedSites
+                });
+            } catch (_) { }
+        } catch (_) {
+            if (autoPipOnTabSwitchToggle.checked !== true && autoPipOnTabSwitchToggle.checked !== false) {
+                autoPipOnTabSwitchToggle.checked = true;
+            }
+            if (!blockedSites.length) {
+                blockedSites = DEFAULT_BLOCKED_SITES.slice();
+            }
+        }
+
+        renderBlockedSites();
+        await refreshCurrentSiteOptions();
+    }
+
+    async function saveSettings() {
+        const tabSwitchEnabled = autoPipOnTabSwitchToggle.checked;
+        autoPipOnTabSwitchToggle.disabled = true;
+
+        try {
+            await chrome.storage.sync.set({ autoPipOnTabSwitch: tabSwitchEnabled });
+            try {
+                await chrome.storage.local.set({ autoPipOnTabSwitch: tabSwitchEnabled });
+            } catch (_) { }
+        } catch (_) {
+        } finally {
+            autoPipOnTabSwitchToggle.disabled = false;
         }
     }
 
@@ -159,194 +251,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    async function migrateOldSettings(syncData, localData) {
-        // Check if old autoPipEnabled exists and new settings don't
-        const hasOldSetting = typeof syncData.autoPipEnabled === 'boolean';
-        const hasNewSettings = 
-            typeof syncData.autoPipOnTabSwitch === 'boolean' ||
-            typeof syncData.autoPipOnWindowSwitch === 'boolean' ||
-            typeof syncData.autoPipOnAppSwitch === 'boolean';
-
-        if (hasOldSetting && !hasNewSettings) {
-            // Migrate old setting to all three new settings
-            const oldValue = syncData.autoPipEnabled;
-            const migration = {
-                autoPipOnTabSwitch: oldValue,
-                autoPipOnWindowSwitch: oldValue,
-                autoPipOnAppSwitch: oldValue
-            };
-            
-            try {
-                await chrome.storage.sync.set(migration);
-                await chrome.storage.local.set(migration);
-                console.log('[Auto PiP] Migrated old autoPipEnabled setting to new separate settings');
-                return migration;
-            } catch (e) {
-                console.error('[Auto PiP] Failed to migrate settings:', e);
-            }
-        }
-        return null;
-    }
-
-    async function loadSettingsWithFallback() {
-        // Try fast local cache first
-        try {
-            const local = await chrome.storage.local.get([
-                'autoPipOnTabSwitch', 'autoPipOnWindowSwitch', 'autoPipOnAppSwitch',
-                'autoPipEnabled', 'autoPipSiteBlocklist'
-            ]);
-            
-            // Try to migrate if needed
-            const sync = await chrome.storage.sync.get([
-                'autoPipEnabled',
-                'autoPipOnTabSwitch',
-                'autoPipOnWindowSwitch',
-                'autoPipOnAppSwitch',
-                'autoPipSiteBlocklist'
-            ]);
-            const migrated = await migrateOldSettings(sync, local);
-            
-            if (migrated) {
-                autoPipOnTabSwitchToggle.checked = migrated.autoPipOnTabSwitch;
-                autoPipOnWindowSwitchToggle.checked = migrated.autoPipOnWindowSwitch;
-                autoPipOnAppSwitchToggle.checked = migrated.autoPipOnAppSwitch;
-            } else {
-                // Defaults for fresh installs: tab switch on, window/app switch off
-                autoPipOnTabSwitchToggle.checked = typeof sync.autoPipOnTabSwitch === 'boolean' ? sync.autoPipOnTabSwitch : true;
-                autoPipOnWindowSwitchToggle.checked = typeof sync.autoPipOnWindowSwitch === 'boolean' ? sync.autoPipOnWindowSwitch : false;
-                autoPipOnAppSwitchToggle.checked = typeof sync.autoPipOnAppSwitch === 'boolean' ? sync.autoPipOnAppSwitch : false;
-            }
-            
-            const localBlocklist = normalizeBlocklist(local.autoPipSiteBlocklist);
-            if (localBlocklist) {
-                blockedSites = localBlocklist;
-                renderBlockedSites();
-            }
-        } catch (_) {
-            // ignore
-        }
-
-        // Then authoritative sync storage
-        try {
-            const result = await chrome.storage.sync.get([
-                'autoPipOnTabSwitch', 'autoPipOnWindowSwitch', 'autoPipOnAppSwitch',
-                'autoPipEnabled', 'autoPipSiteBlocklist'
-            ]);
-            
-            // Try migration again if needed
-            const migrated = await migrateOldSettings(result, {});
-            
-            if (migrated) {
-                autoPipOnTabSwitchToggle.checked = migrated.autoPipOnTabSwitch;
-                autoPipOnWindowSwitchToggle.checked = migrated.autoPipOnWindowSwitch;
-                autoPipOnAppSwitchToggle.checked = migrated.autoPipOnAppSwitch;
-            } else {
-                // Defaults for fresh installs: tab switch on, window/app switch off
-                autoPipOnTabSwitchToggle.checked = typeof result.autoPipOnTabSwitch === 'boolean' ? result.autoPipOnTabSwitch : true;
-                autoPipOnWindowSwitchToggle.checked = typeof result.autoPipOnWindowSwitch === 'boolean' ? result.autoPipOnWindowSwitch : false;
-                autoPipOnAppSwitchToggle.checked = typeof result.autoPipOnAppSwitch === 'boolean' ? result.autoPipOnAppSwitch : false;
-            }
-            
-            const syncBlocklist = normalizeBlocklist(result.autoPipSiteBlocklist);
-            const localBlocklist = normalizeBlocklist(blockedSites);
-            const effectiveBlocklist = syncBlocklist || localBlocklist || DEFAULT_BLOCKED_SITES.slice();
-            blockedSites = effectiveBlocklist;
-            renderBlockedSites();
-
-            if (!syncBlocklist) {
-                try {
-                    await chrome.storage.sync.set({ autoPipSiteBlocklist: effectiveBlocklist });
-                } catch (_) { }
-            }
-
-            // Keep local cache in sync for fast startup
-            try { 
-                await chrome.storage.local.set({ 
-                    autoPipOnTabSwitch: autoPipOnTabSwitchToggle.checked,
-                    autoPipOnWindowSwitch: autoPipOnWindowSwitchToggle.checked,
-                    autoPipOnAppSwitch: autoPipOnAppSwitchToggle.checked,
-                    autoPipSiteBlocklist: blockedSites
-                }); 
-            } catch (_) { }
-        } catch (_) {
-            // If sync is unavailable, ensure we have sensible defaults
-            if (autoPipOnTabSwitchToggle.checked !== true && autoPipOnTabSwitchToggle.checked !== false) {
-                autoPipOnTabSwitchToggle.checked = true;
-            }
-            if (autoPipOnWindowSwitchToggle.checked !== true && autoPipOnWindowSwitchToggle.checked !== false) {
-                autoPipOnWindowSwitchToggle.checked = false;
-            }
-            if (autoPipOnAppSwitchToggle.checked !== true && autoPipOnAppSwitchToggle.checked !== false) {
-                autoPipOnAppSwitchToggle.checked = false;
-            }
-            if (!blockedSites.length) {
-                blockedSites = DEFAULT_BLOCKED_SITES.slice();
-                renderBlockedSites();
-            }
-        }
-
-        renderBlockedSites();
-        await refreshCurrentSiteOptions();
-    }
-
     await loadSettingsWithFallback();
     autoPipOnTabSwitchToggle.disabled = false;
-    autoPipOnWindowSwitchToggle.disabled = false;
-    autoPipOnAppSwitchToggle.disabled = false;
     setBlocklistControlsDisabled(false);
 
-    async function saveSettings() {
-        const tabSwitchEnabled = autoPipOnTabSwitchToggle.checked;
-        const windowSwitchEnabled = autoPipOnWindowSwitchToggle.checked;
-        const appSwitchEnabled = autoPipOnAppSwitchToggle.checked;
-
-        // Disable controls while saving
-        autoPipOnTabSwitchToggle.disabled = true;
-        autoPipOnWindowSwitchToggle.disabled = true;
-        autoPipOnAppSwitchToggle.disabled = true;
-
-        try {
-            // Write to sync (authoritative)
-            await chrome.storage.sync.set({ 
-                autoPipOnTabSwitch: tabSwitchEnabled,
-                autoPipOnWindowSwitch: windowSwitchEnabled,
-                autoPipOnAppSwitch: appSwitchEnabled
-            });
-            // Mirror to local cache (best-effort)
-            try { 
-                await chrome.storage.local.set({ 
-                    autoPipOnTabSwitch: tabSwitchEnabled,
-                    autoPipOnWindowSwitch: windowSwitchEnabled,
-                    autoPipOnAppSwitch: appSwitchEnabled
-                }); 
-            } catch (_) { }
-
-        } catch (error) {
-        } finally {
-            autoPipOnTabSwitchToggle.disabled = false;
-            autoPipOnWindowSwitchToggle.disabled = false;
-            autoPipOnAppSwitchToggle.disabled = false;
-        }
-    }
-
-    // Save settings when changed
     autoPipOnTabSwitchToggle.addEventListener('change', saveSettings);
-    autoPipOnWindowSwitchToggle.addEventListener('change', saveSettings);
-    autoPipOnAppSwitchToggle.addEventListener('change', saveSettings);
 
     addCurrentSiteButton.addEventListener('click', () => {
-        const selected = currentSiteSelect.value;
-        const normalized = normalizeHostEntry(selected);
-        if (!normalized) return;
-        if (blockedSites.includes(normalized)) return;
+        const normalized = normalizeHostEntry(currentSiteSelect.value);
+        if (!normalized || blockedSites.includes(normalized)) return;
         saveBlocklist([...blockedSites, normalized]);
         currentSiteSelect.value = '';
     });
 
     addManualSiteButton.addEventListener('click', () => {
         const normalized = normalizeHostEntry(manualSiteInput.value);
-        if (!normalized) return;
-        if (blockedSites.includes(normalized)) return;
+        if (!normalized || blockedSites.includes(normalized)) return;
         saveBlocklist([...blockedSites, normalized]);
         manualSiteInput.value = '';
     });
@@ -359,26 +279,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace !== 'sync') return;
-        
-        const tabSwitchChange = changes.autoPipOnTabSwitch ? changes.autoPipOnTabSwitch.newValue : undefined;
-        const windowSwitchChange = changes.autoPipOnWindowSwitch ? changes.autoPipOnWindowSwitch.newValue : undefined;
-        const appSwitchChange = changes.autoPipOnAppSwitch ? changes.autoPipOnAppSwitch.newValue : undefined;
 
+        const tabSwitchChange = changes.autoPipOnTabSwitch ? changes.autoPipOnTabSwitch.newValue : undefined;
         if (typeof tabSwitchChange === 'boolean') {
             autoPipOnTabSwitchToggle.checked = tabSwitchChange;
         }
-        
-        if (typeof windowSwitchChange === 'boolean') {
-            autoPipOnWindowSwitchToggle.checked = windowSwitchChange;
-        }
-        
-        if (typeof appSwitchChange === 'boolean') {
-            autoPipOnAppSwitchToggle.checked = appSwitchChange;
-        }
 
         if (changes.autoPipSiteBlocklist) {
-            const nextBlocklist = normalizeBlocklist(changes.autoPipSiteBlocklist.newValue) || [];
-            blockedSites = nextBlocklist;
+            blockedSites = normalizeBlocklist(changes.autoPipSiteBlocklist.newValue) || [];
             renderBlockedSites();
         }
     });

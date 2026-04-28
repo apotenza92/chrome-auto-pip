@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+## [1.7.0] - 2026-04-28
+
+### Changed
+- Removed **Auto PiP on Window Switch** and **Auto PiP on App Switch** because they were inconsistent across platforms, difficult to implement properly, and likely to be difficult to maintain reliably in the future.
+- Simplified the extension back to tab-switch Auto PiP, one-click manual PiP, and disabled-sites support.
+- Updated README, Chrome Web Store copy, manifest copy, and options UI to describe the simpler tab-switch-only behaviour.
+
+### Fixed
+- Improved auto-PiP registration for dynamically-created/player-managed videos, including Shaka-style players that create or replace the video element after the extension first runs.
+
 ## [1.6.3] - 2026-02-14
 
 ### Fixed

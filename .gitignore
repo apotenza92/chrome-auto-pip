@@ -4,3 +4,6 @@ node_modules/
 playwright-report/
 test-results/
 .playwright/
+tmp/orchestrator-artifacts/
+tmp/windows-debug/
+tmp/orchestrator.local.json

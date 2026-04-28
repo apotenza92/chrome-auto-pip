@@ -54,6 +54,14 @@ function clearAutoPiPHandlers() {
         try {
             if (typeof window !== 'undefined') {
                 try { delete window.__auto_pip_registered__; } catch (_) { window.__auto_pip_registered__ = false; }
+                try { delete window.__auto_pip_refresh__; } catch (_) { window.__auto_pip_refresh__ = null; }
+            }
+        } catch (_) { }
+
+        try {
+            if (window.__auto_pip_mutation_observer__) {
+                window.__auto_pip_mutation_observer__.disconnect();
+                try { delete window.__auto_pip_mutation_observer__; } catch (_) { window.__auto_pip_mutation_observer__ = null; }
             }
         } catch (_) { }
 
@@ -71,4 +79,4 @@ function clearAutoPiPHandlers() {
 }
 
 // Execute the function
-clearAutoPiPHandlers(); 
+clearAutoPiPHandlers();

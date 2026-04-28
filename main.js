@@ -1,27 +1,9 @@
 var currentTab = 0;
 var prevTab = null;
 var targetTab = null;
-var targetWindowId = null;
+var pipActiveTab = null;
+var autoPipOnTabSwitch = true;
 
-// Track last focus-change events.
-// Note: Chrome may report WINDOW_ID_NONE for transient focus changes (e.g. extension UI)
-// so we also keep a "best known" normal window id.
-var lastFocusedWindowId = null;
-var lastFocusedNormalWindowId = null;
-
-// about:blank helper tab management (used for window/app switch modes)
-const FALLBACK_HELPER_URL = 'about:blank#chrome-auto-pip-helper';
-const APP_SWITCH_DEBOUNCE_MS = 250;
-var pendingAppSwitchTimer = null;
-var pendingAppSwitchFromWindowId = null;
-
-var blurFallbackWindowId = null;
-var blurFallbackOriginalTabId = null;
-var blurFallbackTempTabId = null;
-var pipActiveTab = null; // Track which tab has active PiP
-var autoPipOnTabSwitch = true; // Default to enabled
-var autoPipOnWindowSwitch = false; // Default to disabled
-var autoPipOnAppSwitch = false; // Default to disabled
 const DEFAULT_BLOCKED_SITES = [
   'meet.google.com',
   '*.zoom.us',
@@ -31,34 +13,22 @@ const DEFAULT_BLOCKED_SITES = [
   '*.slack.com',
   '*.discord.com'
 ];
+
 var autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
-var log = []
 var settingsLoaded = false;
 var settingsReady = null;
 
-function removeTabWithRetry(tabId, context, attempt = 0) {
-  if (tabId == null) return;
-
-  chrome.tabs.remove(tabId, () => {
-    if (chrome.runtime.lastError) {
-      const message = chrome.runtime.lastError.message || '';
-
-      const isBusy = message.includes('Tabs cannot be edited right now');
-      if (isBusy && attempt < 12) {
-        setTimeout(() => {
-          removeTabWithRetry(tabId, context, attempt + 1);
-        }, 150 * (attempt + 1));
-      }
-      return;
-    }
-  });
-}
-
-
-// Helper function to check if a URL is restricted (chrome://, chrome-extension://, etc.)
 function isRestrictedUrl(url) {
   if (!url) return true;
-  const restrictedProtocols = ['chrome:', 'chrome-extension:', 'chrome-search:', 'chrome-devtools:', 'moz-extension:', 'edge:', 'about:'];
+  const restrictedProtocols = [
+    'chrome:',
+    'chrome-extension:',
+    'chrome-search:',
+    'chrome-devtools:',
+    'moz-extension:',
+    'edge:',
+    'about:'
+  ];
   return restrictedProtocols.some(protocol => url.startsWith(protocol));
 }
 
@@ -137,7 +107,6 @@ function isAutoPipAllowedTab(tab) {
   return isAutoPipAllowedUrl(tab.url);
 }
 
-// Small helpers to reduce repetition
 function isValidTab(tab) {
   return !!(tab && tab.url && !isRestrictedUrl(tab.url));
 }
@@ -146,124 +115,129 @@ function hasAnyFrameTrue(results) {
   return Array.isArray(results) && results.some(frameResult => frameResult && frameResult.result);
 }
 
-function isAnyAutoPipEnabled() {
-  return autoPipOnTabSwitch || autoPipOnWindowSwitch || autoPipOnAppSwitch;
+function setTargetTab(tabId) {
+  targetTab = tabId == null ? null : tabId;
 }
 
-function updateTargetWindow(tabId) {
-  if (tabId == null) {
-    targetWindowId = null;
+function getAutoPiPContentSettingApi() {
+  return chrome && chrome.contentSettings && chrome.contentSettings.autoPictureInPicture
+    ? chrome.contentSettings.autoPictureInPicture
+    : null;
+}
+
+function getPrimaryPatternForUrl(url) {
+  if (!url || isRestrictedUrl(url)) return null;
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}/*`;
+  } catch (_) {
+    return null;
+  }
+}
+
+function ensureAutoPiPAllowedForTab(tabId, callback) {
+  const done = typeof callback === 'function' ? callback : () => { };
+  const api = getAutoPiPContentSettingApi();
+  if (!api) {
+    done({ ok: false, reason: 'contentSettingsUnavailable' });
     return;
   }
+
   chrome.tabs.get(tabId, (tab) => {
-    if (chrome.runtime.lastError || !tab) return;
-    targetWindowId = tab.windowId;
-  });
-}
-
-function setTargetTab(tabId) {
-  targetTab = tabId;
-  updateTargetWindow(tabId);
-}
-
-function clearBlurFallback() {
-  blurFallbackWindowId = null;
-  blurFallbackOriginalTabId = null;
-  blurFallbackTempTabId = null;
-}
-
-function cancelPendingAppSwitch() {
-  if (pendingAppSwitchTimer != null) {
-    clearTimeout(pendingAppSwitchTimer);
-  }
-  pendingAppSwitchTimer = null;
-  pendingAppSwitchFromWindowId = null;
-}
-
-function cleanupFocusedHelperTab(windowId) {
-  if (windowId == null) return;
-  const isNone = chrome.windows && chrome.windows.WINDOW_ID_NONE;
-  if (windowId === isNone) return;
-
-  chrome.tabs.query({ active: true, windowId }, (tabs) => {
-    const activeTab = tabs && tabs.length > 0 ? tabs[0] : null;
-    if (!activeTab || !activeTab.id) return;
-    if (activeTab.url !== FALLBACK_HELPER_URL) return;
-    removeTabWithRetry(activeTab.id, 'helperTabCleanup');
-  });
-}
-
-function scheduleDebouncedAppSwitch(fromWindowId, handler) {
-  if (fromWindowId == null) return;
-  const isNone = chrome.windows.WINDOW_ID_NONE;
-  if (fromWindowId === isNone) return;
-
-  // Debounce to avoid false positives when Chrome briefly reports WINDOW_ID_NONE
-  // (e.g. some extension popups/overlays, omnibox UI transitions, etc.).
-  cancelPendingAppSwitch();
-  pendingAppSwitchFromWindowId = fromWindowId;
-
-  pendingAppSwitchTimer = setTimeout(() => {
-    pendingAppSwitchTimer = null;
-
-    const stillNone = lastFocusedWindowId === chrome.windows.WINDOW_ID_NONE;
-    const effectiveFromWindowId = pendingAppSwitchFromWindowId;
-    pendingAppSwitchFromWindowId = null;
-
-    if (!stillNone) return;
-    handler(effectiveFromWindowId);
-  }, APP_SWITCH_DEBOUNCE_MS);
-}
-
-function activateFallbackTab(windowId, originalTabId) {
-  if (windowId == null || originalTabId == null) return;
-
-  blurFallbackWindowId = windowId;
-  blurFallbackOriginalTabId = originalTabId;
-
-  const createBlankTab = (index) => {
-    if (blurFallbackTempTabId != null) {
-      removeTabWithRetry(blurFallbackTempTabId, 'activateFallbackTab');
-      blurFallbackTempTabId = null;
-    }
-
-    const createOptions = { windowId, url: FALLBACK_HELPER_URL, active: true };
-    if (typeof index === 'number') {
-      createOptions.index = index;
-    }
-
-    chrome.tabs.create(createOptions, (tab) => {
-      if (chrome.runtime.lastError || !tab) return;
-      blurFallbackTempTabId = tab.id;
-    });
-  };
-
-  chrome.tabs.get(originalTabId, (tab) => {
-    if (chrome.runtime.lastError || !tab) {
-      createBlankTab();
+    if (chrome.runtime.lastError || !tab || !tab.url) {
+      done({ ok: false, reason: 'tabUnavailable' });
       return;
     }
 
-    const nextIndex = typeof tab.index === 'number' ? tab.index + 1 : undefined;
-    createBlankTab(nextIndex);
+    const primaryPattern = getPrimaryPatternForUrl(tab.url);
+    if (!primaryPattern) {
+      done({ ok: false, reason: 'invalidPattern', url: tab.url });
+      return;
+    }
+
+    api.set({ primaryPattern, setting: 'allow', scope: 'regular' }, () => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        done({ ok: false, reason: error.message, primaryPattern });
+        return;
+      }
+      done({ ok: true, primaryPattern });
+    });
   });
 }
 
-// Script injection helpers - always inject utils.js first for shared functionality
+function safeExecuteScript(tabId, files, callback, options = null) {
+  const allowBlocked = options && options.allowBlocked === true;
+  chrome.tabs.get(tabId, (tab) => {
+    if (chrome.runtime.lastError || !tab) {
+      if (callback) callback(null);
+      return;
+    }
+
+    if (isRestrictedUrl(tab.url)) {
+      if (callback) callback(null);
+      return;
+    }
+
+    const runInjection = () => {
+      if (!allowBlocked && !isAutoPipAllowedUrl(tab.url)) {
+        if (callback) callback(null);
+        return;
+      }
+
+      const execute = (target, onDone) => {
+        chrome.scripting.executeScript({ target, files }, (results) => {
+          if (chrome.runtime.lastError) {
+            onDone(null, chrome.runtime.lastError);
+            return;
+          }
+          onDone(results, null);
+        });
+      };
+
+      execute({ tabId, allFrames: true }, (results, err) => {
+        if (!err) {
+          if (callback) callback(results);
+          return;
+        }
+
+        execute({ tabId, frameIds: [0] }, (fallbackResults, fallbackErr) => {
+          if (fallbackErr) {
+            if (callback) callback(null);
+            return;
+          }
+          if (callback) callback(fallbackResults);
+        });
+      });
+    };
+
+    if (!allowBlocked && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['autoPipSiteBlocklist'], (data) => {
+        const localBlocklist = normalizeBlocklist(data && data.autoPipSiteBlocklist);
+        if (localBlocklist) {
+          autoPipSiteBlocklist = localBlocklist;
+        }
+        runInjection();
+      });
+      return;
+    }
+
+    runInjection();
+  });
+}
+
 function injectWithUtils(tabId, scripts, callback) {
   safeExecuteScript(tabId, ['./scripts/utils.js', './scripts/site-fixes.js', ...scripts], callback);
 }
 
 function injectTriggerAutoPiP(tabId, callback) {
-  injectWithUtils(tabId, ['./scripts/trigger-auto-pip.js'], callback);
+  ensureAutoPiPAllowedForTab(tabId, () => {
+    injectWithUtils(tabId, ['./scripts/trigger-auto-pip.js'], callback);
+  });
 }
 
 function injectCheckVideoScript(tabId, callback) {
   injectWithUtils(tabId, ['./scripts/check-video.js'], callback);
-}
-
-function injectCheckPlayingScript(tabId, callback) {
-  injectWithUtils(tabId, ['./scripts/check-playing.js'], callback);
 }
 
 function injectExitPiPScript(tabId, callback) {
@@ -282,13 +256,22 @@ function injectDisableAutoPiPScript(tabId, callback) {
   safeExecuteScript(tabId, ['./scripts/disable-auto-pip.js'], callback, { allowBlocked: true });
 }
 
+function registerTabForAutoPip(tabId, callback) {
+  if (tabId == null || !autoPipOnTabSwitch) {
+    if (callback) callback(null);
+    return;
+  }
+  injectTriggerAutoPiP(tabId, callback);
+}
+
 function registerAutoPipOnAllTabs() {
+  if (!autoPipOnTabSwitch) return;
   chrome.tabs.query({}, (tabs) => {
     if (!tabs) return;
     tabs.forEach(tab => {
       if (!isValidTab(tab)) return;
       if (!isAutoPipAllowedTab(tab)) return;
-      injectTriggerAutoPiP(tab.id, () => { });
+      registerTabForAutoPip(tab.id, () => { });
     });
   });
 }
@@ -311,16 +294,12 @@ function applyBlocklistToAllTabs() {
       const allowed = isAutoPipAllowedTab(tab);
       if (!allowed) {
         injectDisableAutoPiPScript(tab.id, () => { });
-        if (targetTab === tab.id) {
-          setTargetTab(null);
-        }
-        if (pipActiveTab === tab.id) {
-          pipActiveTab = null;
-        }
+        if (targetTab === tab.id) setTargetTab(null);
+        if (pipActiveTab === tab.id) pipActiveTab = null;
         return;
       }
-      if (isAnyAutoPipEnabled()) {
-        injectTriggerAutoPiP(tab.id, () => { });
+      if (autoPipOnTabSwitch) {
+        registerTabForAutoPip(tab.id, () => { });
       }
     });
   });
@@ -328,18 +307,10 @@ function applyBlocklistToAllTabs() {
 
 async function migrateAutoPipSettings(syncData) {
   const hasOldSetting = typeof syncData.autoPipEnabled === 'boolean';
-  const hasNewSettings =
-    typeof syncData.autoPipOnTabSwitch === 'boolean' ||
-    typeof syncData.autoPipOnWindowSwitch === 'boolean' ||
-    typeof syncData.autoPipOnAppSwitch === 'boolean';
+  const hasTabSwitchSetting = typeof syncData.autoPipOnTabSwitch === 'boolean';
 
-  if (hasOldSetting && !hasNewSettings) {
-    const migrated = {
-      autoPipOnTabSwitch: syncData.autoPipEnabled,
-      autoPipOnWindowSwitch: syncData.autoPipEnabled,
-      autoPipOnAppSwitch: syncData.autoPipEnabled
-    };
-
+  if (hasOldSetting && !hasTabSwitchSetting) {
+    const migrated = { autoPipOnTabSwitch: syncData.autoPipEnabled };
     try { await chrome.storage.sync.set(migrated); } catch (_) { }
     try { await chrome.storage.local.set(migrated); } catch (_) { }
     return migrated;
@@ -348,98 +319,61 @@ async function migrateAutoPipSettings(syncData) {
   return null;
 }
 
-// Helper function to load settings (local cache first, then sync authoritative)
 async function loadSettings() {
   try {
-    // Fast path: local cache for immediate availability
     try {
       const local = await chrome.storage.local.get([
         'autoPipOnTabSwitch',
-        'autoPipOnWindowSwitch',
-        'autoPipOnAppSwitch',
         'autoPipEnabled',
         'autoPipSiteBlocklist'
       ]);
-
-      const hasLocalNew =
-        typeof local.autoPipOnTabSwitch === 'boolean' ||
-        typeof local.autoPipOnWindowSwitch === 'boolean' ||
-        typeof local.autoPipOnAppSwitch === 'boolean';
 
       const localBlocklist = normalizeBlocklist(local.autoPipSiteBlocklist);
       if (localBlocklist) {
         autoPipSiteBlocklist = localBlocklist;
       }
 
-      if (hasLocalNew) {
-        if (typeof local.autoPipOnTabSwitch === 'boolean') {
-          autoPipOnTabSwitch = local.autoPipOnTabSwitch;
-        }
-        if (typeof local.autoPipOnWindowSwitch === 'boolean') {
-          autoPipOnWindowSwitch = local.autoPipOnWindowSwitch;
-        }
-        if (typeof local.autoPipOnAppSwitch === 'boolean') {
-          autoPipOnAppSwitch = local.autoPipOnAppSwitch;
-        }
+      if (typeof local.autoPipOnTabSwitch === 'boolean') {
+        autoPipOnTabSwitch = local.autoPipOnTabSwitch;
       } else if (typeof local.autoPipEnabled === 'boolean') {
         autoPipOnTabSwitch = local.autoPipEnabled;
-        autoPipOnWindowSwitch = local.autoPipEnabled;
-        autoPipOnAppSwitch = local.autoPipEnabled;
       }
-    } catch (e) {
-    }
+    } catch (_) { }
 
-    // Authoritative: sync storage
-      const result = await chrome.storage.sync.get([
-        'autoPipOnTabSwitch',
-        'autoPipOnWindowSwitch',
-        'autoPipOnAppSwitch',
-        'autoPipEnabled',
-        'autoPipSiteBlocklist'
-      ]);
+    const result = await chrome.storage.sync.get([
+      'autoPipOnTabSwitch',
+      'autoPipEnabled',
+      'autoPipSiteBlocklist'
+    ]);
 
     const migrated = await migrateAutoPipSettings(result);
     const effective = migrated || result;
 
     autoPipOnTabSwitch = typeof effective.autoPipOnTabSwitch === 'boolean'
-        ? effective.autoPipOnTabSwitch
-        : true;
-    autoPipOnWindowSwitch = typeof effective.autoPipOnWindowSwitch === 'boolean'
-      ? effective.autoPipOnWindowSwitch
-      : false;
-      autoPipOnAppSwitch = typeof effective.autoPipOnAppSwitch === 'boolean'
-        ? effective.autoPipOnAppSwitch
-        : false;
+      ? effective.autoPipOnTabSwitch
+      : true;
 
-      const syncBlocklist = normalizeBlocklist(effective.autoPipSiteBlocklist);
-      const localBlocklist = normalizeBlocklist(autoPipSiteBlocklist);
-      const effectiveBlocklist = syncBlocklist || localBlocklist || DEFAULT_BLOCKED_SITES.slice();
-      autoPipSiteBlocklist = effectiveBlocklist;
+    const syncBlocklist = normalizeBlocklist(effective.autoPipSiteBlocklist);
+    const localBlocklist = normalizeBlocklist(autoPipSiteBlocklist);
+    const effectiveBlocklist = syncBlocklist || localBlocklist || DEFAULT_BLOCKED_SITES.slice();
+    autoPipSiteBlocklist = effectiveBlocklist;
 
-      if (!syncBlocklist) {
-        try { await chrome.storage.sync.set({ autoPipSiteBlocklist: effectiveBlocklist }); } catch (_) { }
-      }
+    if (!syncBlocklist) {
+      try { await chrome.storage.sync.set({ autoPipSiteBlocklist: effectiveBlocklist }); } catch (_) { }
+    }
 
-    // Mirror to local cache (best-effort)
-      try {
-        await chrome.storage.local.set({
-          autoPipOnTabSwitch,
-          autoPipOnWindowSwitch,
-          autoPipOnAppSwitch,
-          autoPipSiteBlocklist
-        });
-      } catch (_) { }
-  } catch (error) {
-    // If sync is unavailable, ensure we have a sensible default and cache it
+    try {
+      await chrome.storage.local.set({
+        autoPipOnTabSwitch,
+        autoPipSiteBlocklist
+      });
+    } catch (_) { }
+  } catch (_) {
     autoPipOnTabSwitch = true;
-    autoPipOnWindowSwitch = false;
-    autoPipOnAppSwitch = false;
     autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
     try {
       await chrome.storage.local.set({
         autoPipOnTabSwitch,
-        autoPipOnWindowSwitch,
-        autoPipOnAppSwitch,
         autoPipSiteBlocklist
       });
     } catch (_) { }
@@ -449,22 +383,17 @@ async function loadSettings() {
   }
 }
 
-// Load settings on startup
 settingsReady = loadSettings();
 
-// Also refresh settings when the service worker wakes up with browser startup
 if (chrome.runtime && chrome.runtime.onStartup) {
   chrome.runtime.onStartup.addListener(() => {
     loadSettings();
-    // If tab switching is enabled, re-register handlers on all tabs at startup
     setTimeout(() => {
-      if (!autoPipOnTabSwitch) return;
       registerAutoPipOnAllTabs();
     }, 300);
   });
 }
 
-// Set default settings on first install
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
     try {
@@ -472,202 +401,87 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       await chrome.storage.local.clear();
       await chrome.storage.sync.set({
         autoPipOnTabSwitch: true,
-        autoPipOnWindowSwitch: false,
-        autoPipOnAppSwitch: false,
         autoPipSiteBlocklist: DEFAULT_BLOCKED_SITES.slice()
       });
       autoPipOnTabSwitch = true;
-      autoPipOnWindowSwitch = false;
-      autoPipOnAppSwitch = false;
       autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
-    } catch (error) { }
+    } catch (_) { }
     return;
   }
 
   if (details.reason === 'update') {
     try {
-      await chrome.storage.sync.remove(['pipSize', 'pipSizeCustom', 'displayInfo']);
+      await chrome.storage.sync.remove([
+        'pipSize',
+        'pipSizeCustom',
+        'displayInfo'
+      ]);
     } catch (_) { }
     try {
-      await chrome.storage.local.remove(['pipSize', 'pipSizeCustom', 'displayInfo']);
+      await chrome.storage.local.remove([
+        'pipSize',
+        'pipSizeCustom',
+        'displayInfo'
+      ]);
     } catch (_) { }
   }
 });
 
-// Listen for storage changes
 chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === 'sync') {
-    let autoPipSettingsChanged = false;
-    const previousTabSwitch = autoPipOnTabSwitch;
+  if (namespace !== 'sync') return;
 
-    if (changes.autoPipOnTabSwitch) {
-      autoPipOnTabSwitch = changes.autoPipOnTabSwitch.newValue !== false;
-      autoPipSettingsChanged = true;
-      try { chrome.storage.local.set({ autoPipOnTabSwitch }); } catch (_) { }
-    }
+  if (changes.autoPipOnTabSwitch || changes.autoPipEnabled) {
+    const nextValue = changes.autoPipOnTabSwitch
+      ? changes.autoPipOnTabSwitch.newValue !== false
+      : changes.autoPipEnabled.newValue !== false;
 
-    if (changes.autoPipOnWindowSwitch) {
-      autoPipOnWindowSwitch = changes.autoPipOnWindowSwitch.newValue !== false;
-      autoPipSettingsChanged = true;
-      try { chrome.storage.local.set({ autoPipOnWindowSwitch }); } catch (_) { }
-    }
+    autoPipOnTabSwitch = nextValue;
+    try { chrome.storage.local.set({ autoPipOnTabSwitch }); } catch (_) { }
 
-    if (changes.autoPipOnAppSwitch) {
-      autoPipOnAppSwitch = changes.autoPipOnAppSwitch.newValue !== false;
-      autoPipSettingsChanged = true;
-      try { chrome.storage.local.set({ autoPipOnAppSwitch }); } catch (_) { }
-    }
-
-    if (!autoPipSettingsChanged && changes.autoPipEnabled) {
-      const migratedValue = changes.autoPipEnabled.newValue !== false;
-      autoPipOnTabSwitch = migratedValue;
-      autoPipOnWindowSwitch = migratedValue;
-      autoPipOnAppSwitch = migratedValue;
-      autoPipSettingsChanged = true;
-      try {
-        chrome.storage.sync.set({
-          autoPipOnTabSwitch: migratedValue,
-          autoPipOnWindowSwitch: migratedValue,
-          autoPipOnAppSwitch: migratedValue
+    if (autoPipOnTabSwitch) {
+      registerAutoPipOnAllTabs();
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const activeTab = tabs && tabs.length > 0 ? tabs[0] : null;
+        if (!isValidTab(activeTab) || !isAutoPipAllowedTab(activeTab)) return;
+        injectCheckVideoScript(activeTab.id, (results) => {
+          if (!hasAnyFrameTrue(results)) return;
+          setTargetTab(activeTab.id);
+          currentTab = activeTab.id;
+          registerTabForAutoPip(activeTab.id, () => { });
         });
-      } catch (_) { }
-      try {
-        chrome.storage.local.set({
-          autoPipOnTabSwitch: migratedValue,
-          autoPipOnWindowSwitch: migratedValue,
-          autoPipOnAppSwitch: migratedValue
-        });
-      } catch (_) { }
+      });
+    } else {
+      clearAutoPipOnAllTabs();
+      setTargetTab(null);
+      pipActiveTab = null;
     }
+  }
 
-    if (autoPipSettingsChanged) {
-      const anyEnabled = isAnyAutoPipEnabled();
-
-      if (!anyEnabled) {
-        clearAutoPipOnAllTabs();
-        setTargetTab(null);
-        pipActiveTab = null;
-      } else if (changes.autoPipOnTabSwitch || previousTabSwitch !== autoPipOnTabSwitch) {
-        if (autoPipOnTabSwitch) {
-          registerAutoPipOnAllTabs();
-
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs.length > 0) {
-              const activeTab = tabs[0];
-              if (isValidTab(activeTab)) {
-                injectCheckVideoScript(activeTab.id, (results) => {
-                  const hasVideo = hasAnyFrameTrue(results);
-                  if (hasVideo) {
-                    setTargetTab(activeTab.id);
-                    currentTab = activeTab.id;
-                    injectTriggerAutoPiP(targetTab, () => { });
-                  }
-                });
-              }
-            }
-          });
-        } else {
-          clearAutoPipOnAllTabs();
-        }
-      }
-    }
-
-    if (changes.autoPipSiteBlocklist) {
-      const nextBlocklist = normalizeBlocklist(changes.autoPipSiteBlocklist.newValue) || [];
-      autoPipSiteBlocklist = nextBlocklist;
-      try { chrome.storage.local.set({ autoPipSiteBlocklist }); } catch (_) { }
-      applyBlocklistToAllTabs();
-    }
-
+  if (changes.autoPipSiteBlocklist) {
+    const nextBlocklist = normalizeBlocklist(changes.autoPipSiteBlocklist.newValue) || [];
+    autoPipSiteBlocklist = nextBlocklist;
+    try { chrome.storage.local.set({ autoPipSiteBlocklist }); } catch (_) { }
+    applyBlocklistToAllTabs();
   }
 });
 
-// Helper function to safely execute scripts with error handling
-function safeExecuteScript(tabId, files, callback, options = null) {
-  const allowBlocked = options && options.allowBlocked === true;
-  chrome.tabs.get(tabId, (tab) => {
-    if (chrome.runtime.lastError) {
-      if (callback) callback(null);
-      return;
-    }
-
-    if (isRestrictedUrl(tab.url)) {
-      if (callback) callback(null);
-      return;
-    }
-
-    const runInjection = () => {
-      if (!allowBlocked && !isAutoPipAllowedUrl(tab.url)) {
-        if (callback) callback(null);
-        return;
-      }
-
-      const execute = (target, onDone) => {
-        chrome.scripting.executeScript({
-          target,
-          files: files
-        }, (results) => {
-          if (chrome.runtime.lastError) {
-            onDone(null, chrome.runtime.lastError);
-            return;
-          }
-          onDone(results, null);
-        });
-      };
-
-      execute({ tabId: tabId, allFrames: true }, (results, err) => {
-        if (!err) {
-          if (callback) callback(results);
-          return;
-        }
-
-        execute({ tabId: tabId, frameIds: [0] }, (fallbackResults, fallbackErr) => {
-          if (fallbackErr) {
-            if (callback) callback(null);
-            return;
-          }
-          if (callback) callback(fallbackResults);
-        });
-      });
-    };
-
-    if (!allowBlocked && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['autoPipSiteBlocklist'], (data) => {
-        const localBlocklist = normalizeBlocklist(data && data.autoPipSiteBlocklist);
-        if (localBlocklist) {
-          autoPipSiteBlocklist = localBlocklist;
-        }
-        runInjection();
-      });
-      return;
-    }
-    runInjection();
-  });
-}
-
-// Handle extension icon click to manually activate PiP
 if (typeof chrome !== 'undefined' && chrome.action) {
   chrome.action.onClicked.addListener(async (tab) => {
-    if (isRestrictedUrl(tab.url)) {
-      return;
-    }
+    if (!tab || isRestrictedUrl(tab.url)) return;
 
-    // Check if PiP is active on a different tab - exit it there first
     if (pipActiveTab && pipActiveTab !== tab.id) {
-      injectExitPiPScript(pipActiveTab, (results) => {
+      injectExitPiPScript(pipActiveTab, () => {
         pipActiveTab = null;
       });
       return;
     }
 
-    // Try immediate PiP on current tab (works with both playing and paused videos)
-    // This always happens regardless of auto-PiP setting - manual activation should always work
     injectImmediatePiPScript(tab.id, (pipResults) => {
       const frameValues = Array.isArray(pipResults)
         ? pipResults.map(r => r && r.result)
         : [];
 
-      const toggledOff = frameValues.includes("toggled_off");
+      const toggledOff = frameValues.includes('toggled_off');
       const activated = frameValues.includes(true);
 
       if (toggledOff) {
@@ -677,11 +491,9 @@ if (typeof chrome !== 'undefined' && chrome.action) {
       }
     });
 
-    // Only setup auto-PiP for future tab switches if tab switching is enabled
     if (autoPipOnTabSwitch) {
-      injectTriggerAutoPiP(tab.id, (results) => {
-        const result = hasAnyFrameTrue(results);
-        if (result) {
+      registerTabForAutoPip(tab.id, (results) => {
+        if (hasAnyFrameTrue(results)) {
           setTargetTab(tab.id);
         }
       });
@@ -689,9 +501,8 @@ if (typeof chrome !== 'undefined' && chrome.action) {
   });
 }
 
-// Handle tab activation
 if (typeof chrome !== 'undefined' && chrome.tabs) {
-  chrome.tabs.onActivated.addListener(function (tab) {
+  chrome.tabs.onActivated.addListener((tab) => {
     currentTab = tab.tabId;
 
     chrome.tabs.get(currentTab, (activeTab) => {
@@ -700,53 +511,25 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
 
       if (!isAutoPipAllowedTab(activeTab)) {
         injectDisableAutoPiPScript(currentTab, () => { });
-        if (targetTab === currentTab) {
-          setTargetTab(null);
-        }
-        if (pipActiveTab === currentTab) {
-          pipActiveTab = null;
-        }
+        if (targetTab === currentTab) setTargetTab(null);
+        if (pipActiveTab === currentTab) pipActiveTab = null;
         return;
       }
 
-      // Check for playing videos and set target if we don't have one
-      if (targetTab === null && isAnyAutoPipEnabled()) {
-        injectCheckVideoScript(currentTab, (results) => {
-          const hasVideo = hasAnyFrameTrue(results);
-          if (hasVideo) {
-            setTargetTab(currentTab);
-            if (autoPipOnTabSwitch) {
-              injectTriggerAutoPiP(targetTab, (autoResults) => { });
-            }
-          }
-          checkAndActivatePiP();
-        });
-      } else {
-        checkAndActivatePiP();
-      }
-
-      function checkAndActivatePiP() {
-        // Exit PiP if user returned to the target tab
+      const checkAndActivatePiP = () => {
         if (currentTab === targetTab) {
           if (pipActiveTab === targetTab) {
             pipActiveTab = null;
           }
 
-          // First: Exit PiP and clear registration flag
-          // Then: Re-register MediaSession handlers for next tab switch
           injectExitPiPScript(currentTab, () => {
             if (!autoPipOnTabSwitch) {
               injectClearAutoPiPScript(currentTab, () => { });
             }
-            // After exiting, check for video and re-register handlers
             injectCheckVideoScript(currentTab, (results) => {
-              const hasVideo = hasAnyFrameTrue(results);
-              if (hasVideo) {
-                setTargetTab(currentTab);
-                if (autoPipOnTabSwitch) {
-                  injectTriggerAutoPiP(targetTab, (autoResults) => { });
-                }
-              }
+              if (!hasAnyFrameTrue(results)) return;
+              setTargetTab(currentTab);
+              registerTabForAutoPip(currentTab, () => { });
             });
           });
 
@@ -754,236 +537,120 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
           return;
         }
 
-        // Auto-PiP triggers automatically via MediaSession when leaving video tab
-        if (targetTab != null && currentTab != targetTab && autoPipOnTabSwitch) {
+        if (targetTab != null && currentTab !== targetTab && autoPipOnTabSwitch) {
           pipActiveTab = targetTab;
         }
 
         prevTab = tab.tabId;
+      };
+
+      if (targetTab === null && autoPipOnTabSwitch) {
+        injectCheckVideoScript(currentTab, (results) => {
+          if (hasAnyFrameTrue(results)) {
+            setTargetTab(currentTab);
+            registerTabForAutoPip(currentTab, () => { });
+          }
+          checkAndActivatePiP();
+        });
+      } else {
+        checkAndActivatePiP();
       }
     });
   });
 
-  // Handle tab updates to detect when new pages load
-  chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
-    // Inject MediaSession setup early on active tabs while loading
-    if (changeInfo.status === 'loading' && tab && tab.active && tab.url && !isRestrictedUrl(tab.url) && autoPipOnTabSwitch) {
-      if (!isAutoPipAllowedTab(tab)) {
-        injectDisableAutoPiPScript(tabId, () => { });
-        return;
-      }
-      injectTriggerAutoPiP(tabId, (autoResults) => { });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (!tab || !tab.url || isRestrictedUrl(tab.url)) return;
+
+    if (!isAutoPipAllowedTab(tab)) {
+      injectDisableAutoPiPScript(tabId, () => { });
+      return;
     }
 
-    // When page finishes loading, check for videos
-    if (changeInfo.status === 'complete' && tab.url && !isRestrictedUrl(tab.url)) {
-      if (!isAutoPipAllowedTab(tab)) {
-        injectDisableAutoPiPScript(tabId, () => { });
-        return;
-      }
-      if (tabId === currentTab && targetTab === null && isAnyAutoPipEnabled()) {
-        setTimeout(() => {
-          injectCheckVideoScript(tabId, (results) => {
-            const hasVideo = hasAnyFrameTrue(results);
-            if (hasVideo) {
-              setTargetTab(tabId);
-              if (autoPipOnTabSwitch) {
-                injectTriggerAutoPiP(targetTab, (autoResults) => { });
-              }
-            }
-          });
-        }, 2000); // Wait 2 seconds for autoplay to start
-      }
+    if (changeInfo.status === 'loading' && tab.active && autoPipOnTabSwitch) {
+      registerTabForAutoPip(tabId, () => { });
+      return;
+    }
+
+    if (changeInfo.status === 'complete' && tab.active && autoPipOnTabSwitch) {
+      setTimeout(() => {
+        injectCheckVideoScript(tabId, (results) => {
+          if (!hasAnyFrameTrue(results)) return;
+          setTargetTab(tabId);
+          registerTabForAutoPip(tabId, () => { });
+        });
+      }, 500);
     }
   });
 
-  // Listen for content-script notifications when a video starts playing
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
-      if (message.type === 'auto_pip_blocklist_updated') {
+      if (message && message.type === 'auto_pip_set_switch_modes') {
+        const nextSettings = {
+          autoPipOnTabSwitch: message.autoPipOnTabSwitch !== false
+        };
+        autoPipOnTabSwitch = nextSettings.autoPipOnTabSwitch;
+        Promise.allSettled([
+          chrome.storage.sync.set(nextSettings),
+          chrome.storage.local.set(nextSettings)
+        ]).then(() => {
+          sendResponse({ ok: true, settings: nextSettings });
+        });
+        return true;
+      }
+
+      if (message && message.type === 'auto_pip_prime_active_tab') {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          const candidateTab = tabs && tabs.length > 0 ? tabs[0] : null;
+          if (!isValidTab(candidateTab) || !isAutoPipAllowedTab(candidateTab)) {
+            sendResponse({ ok: false, reason: 'invalid_active_tab' });
+            return;
+          }
+
+          injectCheckVideoScript(candidateTab.id, (results) => {
+            if (!hasAnyFrameTrue(results)) {
+              sendResponse({ ok: false, reason: 'no_video_tab_candidate' });
+              return;
+            }
+
+            setTargetTab(candidateTab.id);
+            registerTabForAutoPip(candidateTab.id, () => {
+              sendResponse({ ok: true, tabId: candidateTab.id, targetTab });
+            });
+          });
+        });
+        return true;
+      }
+
+      if (message && message.type === 'auto_pip_blocklist_updated') {
         const nextBlocklist = normalizeBlocklist(message.blocklist) || [];
         autoPipSiteBlocklist = nextBlocklist;
         try { chrome.storage.local.set({ autoPipSiteBlocklist }); } catch (_) { }
         applyBlocklistToAllTabs();
         return;
       }
+
+      if (message && message.type === 'auto_pip_pip_state_changed' && sender && sender.tab) {
+        const senderTabId = sender.tab.id;
+        if (message.inPictureInPicture === true) {
+          pipActiveTab = senderTabId;
+        } else if (pipActiveTab === senderTabId) {
+          pipActiveTab = null;
+        }
+        sendResponse({ ok: true });
+        return true;
+      }
+
       if (!message || !sender || !sender.tab) return;
       if (message.type === 'auto_pip_video_playing') {
         const senderTabId = sender.tab.id;
-        if (!isAutoPipAllowedTab(sender.tab)) {
-          return;
-        }
-        if (isAnyAutoPipEnabled()) {
-          if (senderTabId === currentTab || targetTab === null) {
-            setTargetTab(senderTabId);
-            if (autoPipOnTabSwitch) {
-              injectTriggerAutoPiP(targetTab, (autoResults) => { });
-            }
-          }
+        if (!isAutoPipAllowedTab(sender.tab) || !autoPipOnTabSwitch) return;
+        if (senderTabId === currentTab || targetTab === null) {
+          setTargetTab(senderTabId);
+          registerTabForAutoPip(senderTabId, () => { });
         }
       }
-    } catch (e) {
-      // Ignore errors
+    } catch (_) {
+      // Ignore transient extension lifecycle errors.
     }
   });
-
-  // Cleanup about:blank fallback when user activates another tab
-  chrome.tabs.onActivated.addListener((activeInfo) => {
-    if (blurFallbackWindowId == null || blurFallbackTempTabId == null) return;
-    if (activeInfo.windowId !== blurFallbackWindowId) return;
-    if (activeInfo.tabId === blurFallbackTempTabId) return;
-
-    const tempTabId = blurFallbackTempTabId;
-    removeTabWithRetry(tempTabId, 'onActivated');
-    clearBlurFallback();
-  });
-}
-
-// Track window focus changes for auto-PiP on window blur
-if (typeof chrome !== 'undefined' && chrome.windows) {
-  chrome.windows.getLastFocused({}, (window) => {
-    if (!chrome.runtime.lastError && window) {
-      lastFocusedWindowId = window.id;
-      // Best-effort initial "normal" window tracking
-      lastFocusedNormalWindowId = window.type === 'normal' ? window.id : window.id;
-    }
-  });
-
-  function handleWindowLostFocus(fromWindowId) {
-    const isNone = chrome.windows.WINDOW_ID_NONE;
-    if (fromWindowId == null || fromWindowId === isNone) return;
-
-    chrome.tabs.query({ active: true, windowId: fromWindowId }, (tabs) => {
-      if (!tabs || tabs.length === 0) return;
-      const activeTab = tabs[0];
-      if (!isValidTab(activeTab)) return;
-      if (!isAutoPipAllowedTab(activeTab)) {
-        injectDisableAutoPiPScript(activeTab.id, () => { });
-        if (targetTab === activeTab.id) {
-          setTargetTab(null);
-        }
-        if (pipActiveTab === activeTab.id) {
-          pipActiveTab = null;
-        }
-        return;
-      }
-      if (targetTab && activeTab.id !== targetTab) return;
-
-      injectCheckPlayingScript(activeTab.id, (results) => {
-        const isPlaying = hasAnyFrameTrue(results);
-        if (!isPlaying) return;
-
-        if (targetTab == null) {
-          setTargetTab(activeTab.id);
-        }
-
-        injectTriggerAutoPiP(activeTab.id, () => {
-          pipActiveTab = targetTab || activeTab.id;
-          activateFallbackTab(fromWindowId, activeTab.id);
-        });
-      });
-    });
-  }
-
-  function handleWindowFocusChanged(windowId) {
-    const isNone = chrome.windows.WINDOW_ID_NONE;
-
-    const previousWindowId = lastFocusedWindowId;
-    const previousNormalWindowId = lastFocusedNormalWindowId;
-    lastFocusedWindowId = windowId;
-
-    // If focus moved back to a Chrome window, cancel any pending app-switch debounce.
-    if (windowId !== isNone) {
-      cancelPendingAppSwitch();
-
-      // Track "normal" windows so app-switch can fall back to a real browser window
-      // if focus temporarily moved through a non-normal window.
-      chrome.windows.get(windowId, {}, (win) => {
-        if (chrome.runtime.lastError || !win) return;
-        if (win.type === 'normal') {
-          lastFocusedNormalWindowId = win.id;
-        }
-      });
-
-      // If the service worker restarted and lost blurFallback* state, the helper tab can
-      // become orphaned. Clean it up when the window regains focus.
-      const hasTrackedFallback = blurFallbackWindowId === windowId && blurFallbackTempTabId != null;
-      if (!hasTrackedFallback) {
-        cleanupFocusedHelperTab(windowId);
-      }
-    }
-
-    if (previousWindowId === isNone && windowId === isNone) {
-      return;
-    }
-
-    const returningFromNone = previousWindowId === isNone && windowId !== isNone;
-    const movedToNone = windowId === isNone;
-    const movedToWindow =
-      previousWindowId != null &&
-      previousWindowId !== isNone &&
-      windowId !== isNone &&
-      windowId !== previousWindowId;
-
-    // Best-effort focus-loss handling
-    if (!returningFromNone) {
-      if (movedToNone && autoPipOnAppSwitch) {
-        const fromWindowId =
-          previousNormalWindowId != null && previousNormalWindowId !== isNone
-            ? previousNormalWindowId
-            : previousWindowId;
-
-        scheduleDebouncedAppSwitch(fromWindowId, handleWindowLostFocus);
-      }
-
-      if (movedToWindow && autoPipOnWindowSwitch) {
-        // Note: windowId can refer to various window types (normal/popup/etc). For now we
-        // treat any real window-to-window focus change as eligible.
-        handleWindowLostFocus(previousWindowId);
-      }
-    }
-
-    const returningToTargetWindow = targetTab != null && windowId === targetWindowId && pipActiveTab === targetTab;
-    if (returningToTargetWindow) {
-      chrome.tabs.query({ active: true, windowId }, (tabs) => {
-        if (!tabs || tabs.length === 0) return;
-        const activeTab = tabs[0];
-        if (!isValidTab(activeTab)) return;
-        if (activeTab.id !== targetTab) return;
-        injectExitPiPScript(activeTab.id, () => {
-          pipActiveTab = null;
-          if (!autoPipOnTabSwitch) {
-            injectClearAutoPiPScript(activeTab.id, () => { });
-          }
-        });
-      });
-    }
-
-    if (blurFallbackWindowId === windowId && blurFallbackOriginalTabId != null) {
-      chrome.tabs.query({ active: true, windowId }, (tabs) => {
-        const activeTab = tabs && tabs.length > 0 ? tabs[0] : null;
-        const activeTabId = activeTab ? activeTab.id : null;
-        const tempTabId = blurFallbackTempTabId;
-        const shouldRestoreOriginal = tempTabId != null && activeTabId === tempTabId;
-
-        const cleanupFallback = () => {
-          if (tempTabId != null) {
-            removeTabWithRetry(tempTabId, 'focusCleanup');
-          }
-          clearBlurFallback();
-        };
-
-        if (shouldRestoreOriginal) {
-          chrome.tabs.update(blurFallbackOriginalTabId, { active: true }, () => {
-            cleanupFallback();
-          });
-          return;
-        }
-
-        cleanupFallback();
-      });
-    }
-  }
-
-  chrome.windows.onFocusChanged.addListener(handleWindowFocusChanged);
 }

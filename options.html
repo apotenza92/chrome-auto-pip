@@ -120,6 +120,15 @@
                 transform: translateX(24px);
             }
 
+            .toggle input:disabled + .slider {
+                opacity: 0.55;
+                cursor: not-allowed;
+            }
+
+            .setting-note.warning {
+                color: #92400e;
+            }
+
             select {
                 padding: 8px 12px;
                 border: 1px solid #d1d5db;
@@ -250,52 +259,6 @@
                 </div>
                 <label class="toggle">
                     <input type="checkbox" id="autoPipOnTabSwitch" />
-                    <span class="slider"></span>
-                </label>
-            </div>
-
-            <div class="setting">
-                <div class="setting-info">
-                    <div class="setting-title">Auto PiP on Window Switch</div>
-                    <div class="setting-description">
-                        Automatically activate PiP when switching to a different
-                        browser window.
-                    </div>
-                    <div class="setting-description">
-                        <br />
-                        This mode creates temporary <code>about:blank</code>
-                        helper tabs.
-                        <br />
-                        <br />
-                        This mode is aggressive and can trigger in undesired
-                        circumstances.
-                    </div>
-                </div>
-                <label class="toggle">
-                    <input type="checkbox" id="autoPipOnWindowSwitch" />
-                    <span class="slider"></span>
-                </label>
-            </div>
-
-            <div class="setting">
-                <div class="setting-info">
-                    <div class="setting-title">Auto PiP on App Switch</div>
-                    <div class="setting-description">
-                        Automatically activate PiP when switching to a different
-                        application.
-                    </div>
-                    <div class="setting-description">
-                        <br />
-                        This mode creates temporary <code>about:blank</code>
-                        helper tabs.
-                        <br />
-                        <br />
-                        This mode is aggressive and can trigger in undesired
-                        circumstances.
-                    </div>
-                </div>
-                <label class="toggle">
-                    <input type="checkbox" id="autoPipOnAppSwitch" />
                     <span class="slider"></span>
                 </label>
             </div>

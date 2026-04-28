@@ -4,8 +4,6 @@ async function getSyncSettings(page) {
   return await page.evaluate(() => new Promise(resolve => {
     chrome.storage.sync.get([
       'autoPipOnTabSwitch',
-      'autoPipOnWindowSwitch',
-      'autoPipOnAppSwitch',
       'autoPipSiteBlocklist'
     ], resolve);
   }));
@@ -28,33 +26,17 @@ test('settings update sync storage and persist', async ({ page, extensionId }) =
   await page.goto(`chrome-extension://${extensionId}/options.html`);
 
   await expect(page.locator('#autoPipOnTabSwitch')).toBeChecked();
-  await expect(page.locator('#autoPipOnWindowSwitch')).not.toBeChecked();
-  await expect(page.locator('#autoPipOnAppSwitch')).not.toBeChecked();
 
   await setToggle(page, 'autoPipOnTabSwitch', false);
-  await setToggle(page, 'autoPipOnWindowSwitch', true);
-  await setToggle(page, 'autoPipOnAppSwitch', false);
 
   await expect.poll(async () => {
     const settings = await getSyncSettings(page);
     return settings.autoPipOnTabSwitch;
   }).toBe(false);
 
-  await expect.poll(async () => {
-    const settings = await getSyncSettings(page);
-    return settings.autoPipOnWindowSwitch;
-  }).toBe(true);
-
-  await expect.poll(async () => {
-    const settings = await getSyncSettings(page);
-    return settings.autoPipOnAppSwitch;
-  }).toBe(false);
-
   await page.reload();
 
   await expect(page.locator('#autoPipOnTabSwitch')).not.toBeChecked();
-  await expect(page.locator('#autoPipOnWindowSwitch')).toBeChecked();
-  await expect(page.locator('#autoPipOnAppSwitch')).not.toBeChecked();
 
   await page.waitForFunction(() => {
     const el = document.getElementById('manualSiteInput');

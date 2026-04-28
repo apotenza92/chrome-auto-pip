@@ -3,7 +3,7 @@ const { test, expect } = require('../fixtures/extension-fixture');
 test('tab switch setting updates background state', async ({ context, page, extensionId }) => {
   await page.goto(`chrome-extension://${extensionId}/options.html`);
 
-  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  const worker = context.__autoPipExtensionWorker || context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
 
   const setToggle = async (value) => {
     await page.waitForFunction(() => {

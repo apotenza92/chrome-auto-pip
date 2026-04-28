@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sample Video</title>
+    <title>Delayed Video</title>
     <style>
       body {
         margin: 0;
@@ -20,18 +20,9 @@
     </style>
   </head>
   <body>
-    <video id="video" muted autoplay loop playsinline>
-      <source
-        src="/sample.mp4"
-        type="video/mp4"
-      />
-      Your browser does not support the video tag.
-    </video>
+    <div id="player"></div>
     <script>
-      const video = document.getElementById('video');
-
-      async function startGeneratedStream() {
-        if (!video || typeof document.createElement !== 'function') return false;
+      async function startGeneratedStream(video) {
         const canvas = document.createElement('canvas');
         canvas.width = 640;
         canvas.height = 360;
@@ -46,32 +37,29 @@
           context.fillRect(0, 0, canvas.width, canvas.height);
           context.fillStyle = '#ffffff';
           context.font = 'bold 36px sans-serif';
-          context.fillText('Chrome Auto PiP', 32, 72);
+          context.fillText('Delayed Auto PiP', 32, 72);
           context.font = '24px sans-serif';
-          context.fillText('Generated fixture stream', 32, 118);
-          context.fillText(new Date().toISOString(), 32, 164);
-          context.fillRect(32, 220, 120 + ((elapsed / 15) % 420), 18);
+          context.fillText('Dynamic player fixture', 32, 118);
           requestAnimationFrame(draw);
         };
         draw();
 
-        const stream = canvas.captureStream(30);
-        video.srcObject = stream;
+        video.srcObject = canvas.captureStream(30);
         video.muted = true;
-        video.loop = true;
         video.playsInline = true;
-        video.setAttribute('data-generated-stream', 'true');
-        try {
-          await video.play();
-          return true;
-        } catch (_) {
-          return false;
-        }
+        await video.play();
+        return true;
       }
 
-      window.addEventListener('DOMContentLoaded', () => {
-        startGeneratedStream().catch(() => {});
-      }, { once: true });
+      setTimeout(() => {
+        const video = document.createElement('video');
+        video.id = 'delayed-video';
+        video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        document.getElementById('player').appendChild(video);
+        startGeneratedStream(video).catch(() => {});
+      }, 800);
     </script>
   </body>
 </html>

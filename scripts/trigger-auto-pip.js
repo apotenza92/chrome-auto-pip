@@ -76,8 +76,12 @@
     // Clear the disabled flag since we're being (re-)enabled
     window.__auto_pip_disabled__ = false;
 
-    // Avoid double-registering on reinjection
+    // Avoid double-registering on reinjection, but refresh dynamic players that
+    // create or replace their video after the first injection.
     if (window.__auto_pip_registered__) {
+        if (typeof window.__auto_pip_refresh__ === 'function') {
+            try { window.__auto_pip_refresh__(); } catch (_) { }
+        }
         log('Already registered, skipping');
         return true;
     }
@@ -127,6 +131,17 @@
         
         return videos;
     }
+
+    const notifyPiPState = (inPictureInPicture) => {
+        try {
+            if (chrome?.runtime?.sendMessage) {
+                chrome.runtime.sendMessage({
+                    type: 'auto_pip_pip_state_changed',
+                    inPictureInPicture: inPictureInPicture === true
+                });
+            }
+        } catch (_) { }
+    };
 
     // Main registration function
     function registerAll() {
@@ -229,8 +244,36 @@
             }
         }
 
+        const attachPiPStateBridge = (video) => {
+            if (!video || video.__autoPipStateBridgeAttached) return;
+            video.__autoPipStateBridgeAttached = true;
+            video.addEventListener('enterpictureinpicture', () => notifyPiPState(true));
+            video.addEventListener('leavepictureinpicture', () => notifyPiPState(false));
+        };
+
+        const refreshAutoPipRegistration = () => {
+            if (isDisabled()) return;
+            const candidates = getEligibleVideos();
+            candidates.forEach(attachPiPStateBridge);
+            try {
+                navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
+            } catch (_) { }
+            updatePlaybackState();
+        };
+
+        let refreshTimer = null;
+        const scheduleRegistrationRefresh = () => {
+            if (refreshTimer != null) return;
+            refreshTimer = setTimeout(() => {
+                refreshTimer = null;
+                refreshAutoPipRegistration();
+            }, 100);
+        };
+
+        window.__auto_pip_refresh__ = refreshAutoPipRegistration;
+
         // Listen for video events
-        ['play', 'pause', 'loadedmetadata'].forEach(eventType => {
+        ['play', 'pause', 'loadedmetadata', 'loadeddata', 'canplay'].forEach(eventType => {
             document.addEventListener(eventType, (e) => {
                 if (e.target?.tagName === 'VIDEO') {
                     log('Video event:', eventType);
@@ -246,6 +289,7 @@
                         e.target.setAttribute('autopictureinpicture', '');
                         log('Added autopictureinpicture on', eventType);
                     }
+                    attachPiPStateBridge(e.target);
                     updatePlaybackState();
                 }
             }, true);
@@ -287,7 +331,18 @@
             }
         }, true);
 
-        updatePlaybackState();
+        refreshAutoPipRegistration();
+
+        if (!window.__auto_pip_mutation_observer__) {
+            try {
+                const observer = new MutationObserver(scheduleRegistrationRefresh);
+                observer.observe(document.documentElement || document.body, {
+                    childList: true,
+                    subtree: true
+                });
+                window.__auto_pip_mutation_observer__ = observer;
+            } catch (_) { }
+        }
 
         // Site-specific: Fallback visibility-based PiP attempt (e.g., Twitch)
         // Note: With autopictureinpicture attribute, browser should handle this automatically
@@ -386,6 +441,5 @@
         }
     }
 
-    // Register immediately
     return registerAll();
 })();

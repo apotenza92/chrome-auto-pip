@@ -4,7 +4,7 @@ const { startStaticServer } = require('../fixtures/static-server');
 test('blocklist disables auto-pip on a site', async ({ context }) => {
   test.setTimeout(60000);
 
-  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  const worker = context.__autoPipExtensionWorker || context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
   const { server, baseURL } = await startStaticServer();
   const videoUrl = `${baseURL}/sample-video.html`;
   const host = new URL(baseURL).hostname;
@@ -24,11 +24,10 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
         });
       });
 
-      const windowA = await new Promise(resolve => {
-        chrome.windows.create({ url, focused: true }, resolve);
+      const tab = await new Promise(resolve => {
+        chrome.tabs.create({ url, active: true }, resolve);
       });
-
-      const videoTabId = windowA.tabs && windowA.tabs[0] ? windowA.tabs[0].id : null;
+      const videoTabId = tab ? tab.id : null;
       if (videoTabId != null) {
         await waitForTabComplete(videoTabId);
         await chrome.scripting.executeScript({
@@ -46,7 +45,7 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
         });
       }
 
-      return { windowId: windowA.id, videoTabId };
+      return { videoTabId };
     }, videoUrl);
   };
 
@@ -64,7 +63,7 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
   };
 
   try {
-    const { windowId, videoTabId } = await createVideoTab();
+    const { videoTabId } = await createVideoTab();
 
     await worker.evaluate((payload) => new Promise(resolve => {
       chrome.storage.sync.set(payload, () => resolve());
@@ -74,8 +73,8 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
     await expect.poll(async () => (await getTabFlags(videoTabId)).registered).toBe(false);
 
     await worker.evaluate((id) => {
-      if (id) chrome.windows.remove(id);
-    }, windowId);
+      if (id) chrome.tabs.remove(id);
+    }, videoTabId);
   } finally {
     server.close();
   }

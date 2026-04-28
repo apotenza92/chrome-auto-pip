@@ -19,6 +19,20 @@ function startStaticServer() {
         return;
       }
 
+      if (req.url === '/delayed-video.html') {
+        const filePath = path.resolve(__dirname, 'delayed-video.html');
+        fs.readFile(filePath, (err, data) => {
+          if (err) {
+            res.statusCode = 500;
+            res.end('Failed to read fixture');
+            return;
+          }
+          res.setHeader('Content-Type', 'text/html');
+          res.end(data);
+        });
+        return;
+      }
+
       if (req.url === '/sample.mp4') {
         const filePath = path.resolve(__dirname, 'sample.mp4');
 
