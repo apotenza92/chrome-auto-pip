@@ -45,7 +45,8 @@ test('tab switch registration follows dynamically-created player video', async (
             hasVideo: !!video,
             playing: !!video && !video.paused && !video.ended && video.readyState >= 2,
             registered: window.__auto_pip_registered__ === true,
-            autoPipAttr: !!video && video.hasAttribute('autopictureinpicture')
+            autoPipAttr: !!video && video.hasAttribute('autopictureinpicture'),
+            playbackState: navigator.mediaSession ? navigator.mediaSession.playbackState : null
           };
         }
       });
@@ -53,7 +54,8 @@ test('tab switch registration follows dynamically-created player video', async (
         hasVideo: false,
         playing: false,
         registered: false,
-        autoPipAttr: false
+        autoPipAttr: false,
+        playbackState: null
       };
     }, tabId);
   };
@@ -65,7 +67,8 @@ test('tab switch registration follows dynamically-created player video', async (
       hasVideo: true,
       playing: true,
       registered: true,
-      autoPipAttr: true
+      autoPipAttr: true,
+      playbackState: 'playing'
     });
   } finally {
     if (tabId != null) {

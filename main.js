@@ -406,6 +406,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       autoPipOnTabSwitch = true;
       autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
     } catch (_) { }
+    registerAutoPipOnAllTabs();
     return;
   }
 
@@ -424,13 +425,14 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         'displayInfo'
       ]);
     } catch (_) { }
+    registerAutoPipOnAllTabs();
   }
 });
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace !== 'sync') return;
+  if (namespace !== 'sync' && namespace !== 'local') return;
 
-  if (changes.autoPipOnTabSwitch || changes.autoPipEnabled) {
+  if (namespace === 'sync' && (changes.autoPipOnTabSwitch || changes.autoPipEnabled)) {
     const nextValue = changes.autoPipOnTabSwitch
       ? changes.autoPipOnTabSwitch.newValue !== false
       : changes.autoPipEnabled.newValue !== false;
@@ -443,11 +445,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const activeTab = tabs && tabs.length > 0 ? tabs[0] : null;
         if (!isValidTab(activeTab) || !isAutoPipAllowedTab(activeTab)) return;
+        registerTabForAutoPip(activeTab.id, () => { });
         injectCheckVideoScript(activeTab.id, (results) => {
           if (!hasAnyFrameTrue(results)) return;
           setTargetTab(activeTab.id);
           currentTab = activeTab.id;
-          registerTabForAutoPip(activeTab.id, () => { });
         });
       });
     } else {
@@ -460,7 +462,9 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   if (changes.autoPipSiteBlocklist) {
     const nextBlocklist = normalizeBlocklist(changes.autoPipSiteBlocklist.newValue) || [];
     autoPipSiteBlocklist = nextBlocklist;
-    try { chrome.storage.local.set({ autoPipSiteBlocklist }); } catch (_) { }
+    if (namespace === 'sync') {
+      try { chrome.storage.local.set({ autoPipSiteBlocklist }); } catch (_) { }
+    }
     applyBlocklistToAllTabs();
   }
 });
@@ -516,6 +520,10 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
         return;
       }
 
+      if (autoPipOnTabSwitch) {
+        registerTabForAutoPip(currentTab, () => { });
+      }
+
       const checkAndActivatePiP = () => {
         if (currentTab === targetTab) {
           if (pipActiveTab === targetTab) {
@@ -529,7 +537,6 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
             injectCheckVideoScript(currentTab, (results) => {
               if (!hasAnyFrameTrue(results)) return;
               setTargetTab(currentTab);
-              registerTabForAutoPip(currentTab, () => { });
             });
           });
 
@@ -548,7 +555,6 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
         injectCheckVideoScript(currentTab, (results) => {
           if (hasAnyFrameTrue(results)) {
             setTargetTab(currentTab);
-            registerTabForAutoPip(currentTab, () => { });
           }
           checkAndActivatePiP();
         });
@@ -572,11 +578,11 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
     }
 
     if (changeInfo.status === 'complete' && tab.active && autoPipOnTabSwitch) {
+      registerTabForAutoPip(tabId, () => { });
       setTimeout(() => {
         injectCheckVideoScript(tabId, (results) => {
           if (!hasAnyFrameTrue(results)) return;
           setTargetTab(tabId);
-          registerTabForAutoPip(tabId, () => { });
         });
       }, 500);
     }

@@ -16,7 +16,7 @@
 
     // --- [ Video State Helpers ] --- //
     function isPlaying(video) {
-        return video.currentTime > 0 && !video.paused && !video.ended;
+        return !video.paused && !video.ended && video.readyState >= 2;
     }
 
     function isVisible(video) {
@@ -138,4 +138,3 @@
         getActiveSiteFix
     };
 })();
-

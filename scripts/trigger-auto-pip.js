@@ -3,7 +3,7 @@
 (async function triggerAutoPiP() {
     'use strict';
 
-    const DEBUG = true;
+    const DEBUG = false;
     const log = (...args) => DEBUG && console.log('[auto-pip]', ...args);
 
     log('trigger-auto-pip.js injected', { url: location.href, isChild: window.top !== window });
@@ -15,6 +15,16 @@
             return null;
         }
     };
+
+    const DEFAULT_BLOCKED_SITES = [
+        'meet.google.com',
+        '*.zoom.us',
+        'zoom.com',
+        'teams.microsoft.com',
+        'teams.live.com',
+        '*.slack.com',
+        '*.discord.com'
+    ];
 
     const isHostBlocked = (hostname, patterns) => {
         if (!hostname || !Array.isArray(patterns)) return false;
@@ -46,7 +56,7 @@
         const local = await readStorage(chrome.storage.local);
         if (Array.isArray(local)) return local;
         const sync = await readStorage(chrome.storage.sync);
-        return Array.isArray(sync) ? sync : [];
+        return Array.isArray(sync) ? sync : DEFAULT_BLOCKED_SITES;
     };
 
     const hostname = getHostname();
@@ -108,7 +118,7 @@
             videos = findAllVideos({
                 deep: true,
                 minReadyState: 1,
-                visibleOnly: true,
+                visibleOnly: false,
                 playingFirst: true
             });
         } else {
@@ -169,7 +179,7 @@
                 return;
             }
 
-            const video = candidates[0];
+            const video = (isPlaying && candidates.find(isPlaying)) || candidates[0];
             try {
                 log('Requesting PiP for video', { paused: video.paused, src: video.src?.substring(0, 50) });
                 if (requestPiP) {
@@ -229,7 +239,8 @@
             }
             
             const candidates = getEligibleVideos();
-            const hasPlaying = candidates.length > 0 && isPlaying && isPlaying(candidates[0]);
+            const playingVideo = isPlaying ? candidates.find(isPlaying) : null;
+            const hasPlaying = !!playingVideo;
             const newState = hasPlaying ? 'playing' : 'paused';
             log('updatePlaybackState:', newState, 'candidates:', candidates.length);
             navigator.mediaSession.playbackState = newState;
@@ -273,7 +284,7 @@
         window.__auto_pip_refresh__ = refreshAutoPipRegistration;
 
         // Listen for video events
-        ['play', 'pause', 'loadedmetadata', 'loadeddata', 'canplay'].forEach(eventType => {
+        ['play', 'playing', 'pause', 'loadedmetadata', 'loadeddata', 'canplay'].forEach(eventType => {
             document.addEventListener(eventType, (e) => {
                 if (e.target?.tagName === 'VIDEO') {
                     log('Video event:', eventType);
@@ -323,7 +334,7 @@
                 // Tab becoming hidden - ensure MediaSession is properly set for auto-PiP
                 log('Tab becoming hidden, ensuring MediaSession is ready');
                 const candidates = getEligibleVideos();
-                if (candidates.length > 0 && isPlaying && isPlaying(candidates[0])) {
+                if (isPlaying && candidates.some(isPlaying)) {
                     navigator.mediaSession.playbackState = 'playing';
                     navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
                     log('MediaSession set to playing before hide, handler registered');

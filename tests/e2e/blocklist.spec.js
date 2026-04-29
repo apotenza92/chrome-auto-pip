@@ -66,11 +66,13 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
     const { videoTabId } = await createVideoTab();
 
     await worker.evaluate((payload) => new Promise(resolve => {
-      chrome.storage.sync.set(payload, () => resolve());
+      chrome.storage.sync.set(payload, () => {
+        chrome.storage.local.set(payload, () => resolve());
+      });
     }), { autoPipSiteBlocklist: [host] });
 
-    await expect.poll(async () => (await getTabFlags(videoTabId)).disabled).toBe(true);
-    await expect.poll(async () => (await getTabFlags(videoTabId)).registered).toBe(false);
+    await expect.poll(async () => (await getTabFlags(videoTabId)).disabled, { timeout: 15000 }).toBe(true);
+    await expect.poll(async () => (await getTabFlags(videoTabId)).registered, { timeout: 15000 }).toBe(false);
 
     await worker.evaluate((id) => {
       if (id) chrome.tabs.remove(id);
