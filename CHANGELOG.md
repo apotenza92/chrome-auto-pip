@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-04-29
+
+### Fixed
+- Fixed tab-switch Auto PiP activation for Shaka/player-managed videos by registering the browser-facing MediaSession handler in the page world and retrying when dynamically-created videos become eligible.
+
 ## [1.7.0] - 2026-04-28
 
 ### Changed
