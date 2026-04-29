@@ -35,6 +35,7 @@ async function launchExtensionContext() {
     args: [
       `--disable-extensions-except=${extensionPath}`,
       `--load-extension=${extensionPath}`,
+      '--enable-features=AutoPictureInPictureForVideoPlayback,MediaSessionEnterPictureInPicture,BrowserInitiatedAutomaticPictureInPicture',
       '--autoplay-policy=no-user-gesture-required',
       '--no-first-run',
       '--no-default-browser-check'

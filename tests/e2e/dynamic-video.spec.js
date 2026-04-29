@@ -77,3 +77,58 @@ test('tab switch registration follows dynamically-created player video', async (
     server.close();
   }
 });
+
+test('tab switch enters PiP for dynamically-created player video', async ({ context }) => {
+  test.setTimeout(60000);
+
+  const { server, baseURL } = await startStaticServer();
+  const videoUrl = `${baseURL}/delayed-video.html`;
+  const blankUrl = `${baseURL}/blank.html`;
+
+  const getFlags = async (page) => {
+    return page.evaluate(() => {
+      const video = document.querySelector('video');
+      if (!video) {
+        return {
+          hasVideo: false,
+          playing: false,
+          autoPipAttr: false,
+          playbackState: null,
+          inPictureInPicture: false
+        };
+      }
+
+      return {
+        hasVideo: true,
+        playing: !video.paused && !video.ended && video.readyState >= 2,
+        autoPipAttr: video.hasAttribute('autopictureinpicture'),
+        playbackState: navigator.mediaSession ? navigator.mediaSession.playbackState : null,
+        inPictureInPicture: document.pictureInPictureElement === video
+      };
+    });
+  };
+
+  let videoPage = null;
+  let blankPage = null;
+  try {
+    videoPage = await context.newPage();
+    await videoPage.goto(videoUrl);
+    await expect.poll(async () => getFlags(videoPage), { timeout: 15000 }).toMatchObject({
+      hasVideo: true,
+      playing: true,
+      autoPipAttr: true,
+      playbackState: 'playing'
+    });
+
+    blankPage = await context.newPage();
+    await blankPage.goto(blankUrl);
+    await blankPage.bringToFront();
+    await expect.poll(async () => getFlags(videoPage), { timeout: 10000 }).toMatchObject({
+      inPictureInPicture: true
+    });
+  } finally {
+    if (blankPage) await blankPage.close().catch(() => {});
+    if (videoPage) await videoPage.close().catch(() => {});
+    server.close();
+  }
+});

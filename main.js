@@ -115,6 +115,13 @@ function hasAnyFrameTrue(results) {
   return Array.isArray(results) && results.some(frameResult => frameResult && frameResult.result);
 }
 
+function hasAnyFramePiPActive(results) {
+  return Array.isArray(results) && results.some((frameResult) => {
+    const result = frameResult && frameResult.result;
+    return result === true || result === 'already_active' || !!(result && result.ok === true);
+  });
+}
+
 function setTargetTab(tabId) {
   targetTab = tabId == null ? null : tabId;
 }
@@ -186,7 +193,12 @@ function safeExecuteScript(tabId, files, callback, options = null) {
       }
 
       const execute = (target, onDone) => {
-        chrome.scripting.executeScript({ target, files }, (results) => {
+        const injection = { target, files };
+        if (options && options.world) {
+          injection.world = options.world;
+        }
+
+        chrome.scripting.executeScript(injection, (results) => {
           if (chrome.runtime.lastError) {
             onDone(null, chrome.runtime.lastError);
             return;
@@ -230,9 +242,21 @@ function injectWithUtils(tabId, scripts, callback) {
   safeExecuteScript(tabId, ['./scripts/utils.js', './scripts/site-fixes.js', ...scripts], callback);
 }
 
+function injectPageAutoPiPScript(tabId, callback) {
+  safeExecuteScript(tabId, ['./scripts/page-auto-pip.js'], callback, { world: 'MAIN' });
+}
+
+function injectPageClearAutoPiPScript(tabId, callback) {
+  safeExecuteScript(tabId, ['./scripts/page-clear-auto-pip.js'], callback, { allowBlocked: true, world: 'MAIN' });
+}
+
 function injectTriggerAutoPiP(tabId, callback) {
   ensureAutoPiPAllowedForTab(tabId, () => {
-    injectWithUtils(tabId, ['./scripts/trigger-auto-pip.js'], callback);
+    injectWithUtils(tabId, ['./scripts/trigger-auto-pip.js'], (results) => {
+      injectPageAutoPiPScript(tabId, () => {
+        if (callback) callback(results);
+      });
+    });
   });
 }
 
@@ -248,12 +272,20 @@ function injectImmediatePiPScript(tabId, callback) {
   safeExecuteScript(tabId, ['./scripts/utils.js', './scripts/site-fixes.js', './scripts/immediate-pip.js'], callback, { allowBlocked: true });
 }
 
+function injectEnsurePiPScript(tabId, callback) {
+  injectWithUtils(tabId, ['./scripts/ensure-pip.js'], callback);
+}
+
 function injectClearAutoPiPScript(tabId, callback) {
-  safeExecuteScript(tabId, ['./scripts/clear-auto-pip.js'], callback);
+  safeExecuteScript(tabId, ['./scripts/clear-auto-pip.js'], () => {
+    injectPageClearAutoPiPScript(tabId, callback);
+  });
 }
 
 function injectDisableAutoPiPScript(tabId, callback) {
-  safeExecuteScript(tabId, ['./scripts/disable-auto-pip.js'], callback, { allowBlocked: true });
+  safeExecuteScript(tabId, ['./scripts/disable-auto-pip.js'], () => {
+    injectPageClearAutoPiPScript(tabId, callback);
+  }, { allowBlocked: true });
 }
 
 function registerTabForAutoPip(tabId, callback) {
@@ -507,14 +539,28 @@ if (typeof chrome !== 'undefined' && chrome.action) {
 
 if (typeof chrome !== 'undefined' && chrome.tabs) {
   chrome.tabs.onActivated.addListener((tab) => {
-    currentTab = tab.tabId;
+    const activatedTabId = tab.tabId;
+    const leavingTargetTab = autoPipOnTabSwitch && targetTab != null && activatedTabId !== targetTab
+      ? targetTab
+      : null;
+
+    currentTab = activatedTabId;
+
+    if (leavingTargetTab != null) {
+      registerTabForAutoPip(leavingTargetTab, () => {
+        injectEnsurePiPScript(leavingTargetTab, (results) => {
+          if (hasAnyFramePiPActive(results)) {
+            pipActiveTab = leavingTargetTab;
+          }
+        });
+      });
+    }
 
     chrome.tabs.get(currentTab, (activeTab) => {
       if (chrome.runtime.lastError || !activeTab) return;
       currentTab = activeTab.id;
 
       if (!isAutoPipAllowedTab(activeTab)) {
-        injectDisableAutoPiPScript(currentTab, () => { });
         if (targetTab === currentTab) setTargetTab(null);
         if (pipActiveTab === currentTab) pipActiveTab = null;
         return;
@@ -524,7 +570,7 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
         registerTabForAutoPip(currentTab, () => { });
       }
 
-      const checkAndActivatePiP = () => {
+      const checkAndTrackTarget = () => {
         if (currentTab === targetTab) {
           if (pipActiveTab === targetTab) {
             pipActiveTab = null;
@@ -544,10 +590,6 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
           return;
         }
 
-        if (targetTab != null && currentTab !== targetTab && autoPipOnTabSwitch) {
-          pipActiveTab = targetTab;
-        }
-
         prevTab = tab.tabId;
       };
 
@@ -556,10 +598,10 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
           if (hasAnyFrameTrue(results)) {
             setTargetTab(currentTab);
           }
-          checkAndActivatePiP();
+          checkAndTrackTarget();
         });
       } else {
-        checkAndActivatePiP();
+        checkAndTrackTarget();
       }
     });
   });
