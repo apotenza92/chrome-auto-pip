@@ -13,6 +13,8 @@ This repo is a Chrome (MV3) extension. This file documents common project workfl
 
 End-to-end tests use Playwright.
 
+Do not run e2e/browser validation on the live host macOS desktop. Run e2e/browser validation inside the Parallels VM orchestrator targets instead, and suspend/close VMs and browser sessions after the run.
+
 ```bash
 npm install
 npm run test:e2e

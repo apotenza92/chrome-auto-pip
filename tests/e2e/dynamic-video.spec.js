@@ -2,7 +2,7 @@ const { test, expect } = require('../fixtures/extension-fixture');
 const { startStaticServer } = require('../fixtures/static-server');
 
 test('tab switch registration follows dynamically-created player video', async ({ context }) => {
-  test.setTimeout(60000);
+  test.setTimeout(120000);
 
   const worker = context.__autoPipExtensionWorker || context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
   const { server, baseURL } = await startStaticServer();
@@ -79,7 +79,7 @@ test('tab switch registration follows dynamically-created player video', async (
 });
 
 test('tab switch enters PiP for dynamically-created player video', async ({ context }) => {
-  test.setTimeout(60000);
+  test.setTimeout(120000);
 
   const { server, baseURL } = await startStaticServer();
   const videoUrl = `${baseURL}/delayed-video.html`;
