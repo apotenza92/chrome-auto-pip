@@ -95,16 +95,3 @@ Most video sites work automatically, including:
 
 - Chrome 134+ or compatible Chromium browser
 - The `auto-picture-in-picture-for-video-playback` flag must be enabled
-
-## Store Description Copy
-
-Use this updated text for the Chrome Web Store long description:
-
-Automatically enables Picture-in-Picture when switching tabs, with one-click manual PiP from the toolbar icon.
-
-Default behaviour for new installs:
-- Auto PiP on Tab Switch: On
-
-This extension focuses on tab switching only. Window-switch and app-switch Auto PiP modes were removed in version 1.7.0 because they were inconsistent across platforms and difficult to maintain reliably.
-
-Google Meet and other conferencing apps are disabled by default because automatic PiP can conflict with meeting controls and expected call behaviour. You can manage disabled sites in Extension Options.
