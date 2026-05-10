@@ -32,6 +32,26 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
         await waitForTabComplete(videoTabId);
         await chrome.scripting.executeScript({
           target: { tabId: videoTabId },
+          world: 'MAIN',
+          func: () => {
+            window.__site_media_session_enter_pip_cleared__ = false;
+            if (!navigator.mediaSession || navigator.mediaSession.__autoPipTestPatched) return true;
+            const original = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
+            navigator.mediaSession.setActionHandler = (action, handler) => {
+              if (action === 'enterpictureinpicture' && handler === null) {
+                window.__site_media_session_enter_pip_cleared__ = true;
+              }
+              return original(action, handler);
+            };
+            navigator.mediaSession.__autoPipTestPatched = true;
+            navigator.mediaSession.setActionHandler('enterpictureinpicture', () => {
+              window.__site_media_session_enter_pip_called__ = true;
+            });
+            return true;
+          }
+        });
+        await chrome.scripting.executeScript({
+          target: { tabId: videoTabId },
           func: () => {
             const video = document.querySelector('video');
             if (!video) return false;
@@ -58,12 +78,46 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
           disabled: window.__auto_pip_disabled__ === true
         })
       });
-      return result && result[0] ? result[0].result : { registered: false, disabled: false };
+      const mainResult = await chrome.scripting.executeScript({
+        target: { tabId: id },
+        world: 'MAIN',
+        func: () => ({
+          pageDisabled: window.__auto_pip_page_disabled__ === true,
+          siteMediaSessionCleared: window.__site_media_session_enter_pip_cleared__ === true
+        })
+      });
+      return {
+        ...(result && result[0] ? result[0].result : { registered: false, disabled: false }),
+        ...(mainResult && mainResult[0] ? mainResult[0].result : { pageDisabled: false, siteMediaSessionCleared: false })
+      };
     }, tabId);
+  };
+
+  const getAutoPiPContentSetting = async () => {
+    return worker.evaluate(async (url) => {
+      if (!chrome.contentSettings.autoPictureInPicture) return null;
+      const primaryUrl = new URL(url).origin + '/';
+      return await chrome.contentSettings.autoPictureInPicture.get({ primaryUrl });
+    }, baseURL);
   };
 
   try {
     const { videoTabId } = await createVideoTab();
+
+    const hasAutoPiPContentSetting = await worker.evaluate(() => !!chrome.contentSettings.autoPictureInPicture);
+
+    if (hasAutoPiPContentSetting) {
+      await worker.evaluate(async (url) => {
+        const primaryPattern = new URL(url).origin + '/*';
+        await chrome.contentSettings.autoPictureInPicture.set({
+          primaryPattern,
+          setting: 'allow',
+          scope: 'regular'
+        });
+      }, baseURL);
+
+      await expect.poll(async () => (await getAutoPiPContentSetting()).setting, { timeout: 15000 }).toBe('allow');
+    }
 
     await worker.evaluate((payload) => new Promise(resolve => {
       chrome.storage.sync.set(payload, () => {
@@ -73,6 +127,11 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
 
     await expect.poll(async () => (await getTabFlags(videoTabId)).disabled, { timeout: 15000 }).toBe(true);
     await expect.poll(async () => (await getTabFlags(videoTabId)).registered, { timeout: 15000 }).toBe(false);
+    await expect.poll(async () => (await getTabFlags(videoTabId)).pageDisabled, { timeout: 15000 }).toBe(true);
+    expect((await getTabFlags(videoTabId)).siteMediaSessionCleared).toBe(false);
+    if (hasAutoPiPContentSetting) {
+      await expect.poll(async () => (await getAutoPiPContentSetting()).setting, { timeout: 15000 }).toBe('block');
+    }
 
     await worker.evaluate((id) => {
       if (id) chrome.tabs.remove(id);

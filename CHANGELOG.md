@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-05-10
+
+### Fixed
+- Reduced CPU and power usage on pages with frequent DOM churn by caching discovered videos and refreshing Auto PiP registration only when new videos are added.
+- Improved disabled-site handling so excluded sites also block Chrome's Auto PiP content setting and disable extension-managed page-level Auto PiP handling.
+- Made turning Auto PiP off apply immediately to already-open video tabs.
+
 ## [1.7.1] - 2026-04-29
 
 ### Fixed

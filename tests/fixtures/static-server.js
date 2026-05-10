@@ -33,6 +33,26 @@ function startStaticServer() {
         return;
       }
 
+      if (req.url === '/high-churn-video.html') {
+        const filePath = path.resolve(__dirname, 'high-churn-video.html');
+        fs.readFile(filePath, (err, data) => {
+          if (err) {
+            res.statusCode = 500;
+            res.end('Failed to read fixture');
+            return;
+          }
+          res.setHeader('Content-Type', 'text/html');
+          res.end(data);
+        });
+        return;
+      }
+
+      if (req.url === '/blank.html') {
+        res.setHeader('Content-Type', 'text/html');
+        res.end('<!doctype html><title>Blank Target</title><body style="font-family:sans-serif;padding:48px"><h1>Blank Target</h1><p>Auto PiP should be visible after switching here.</p></body>');
+        return;
+      }
+
       if (req.url === '/sample.mp4') {
         const filePath = path.resolve(__dirname, 'sample.mp4');
 

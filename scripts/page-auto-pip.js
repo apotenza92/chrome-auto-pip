@@ -8,9 +8,14 @@
     const state = window.__auto_pip_page_state__ || {
         registered: false,
         refreshTimer: null,
-        observer: null
+        observer: null,
+        videos: new Set(),
+        videoCachePrimed: false
     };
     window.__auto_pip_page_state__ = state;
+    if (!(state.videos instanceof Set)) {
+        state.videos = new Set();
+    }
     window.__auto_pip_page_disabled__ = false;
 
     const isDisabled = () => window.__auto_pip_page_disabled__ === true;
@@ -20,39 +25,96 @@
         return !!video && !video.paused && !video.ended && video.readyState >= 2;
     }
 
-    function collectVideos(root, videos) {
+    function collectVideos(root, videos, includeShadowRoots) {
         if (!root) return;
         try {
             if (root instanceof HTMLVideoElement) {
-                videos.push(root);
+                videos.add(root);
             }
         } catch (_) { }
 
-        let elements = [];
         try {
-            elements = root.querySelectorAll ? Array.from(root.querySelectorAll('video, *')) : [];
-        } catch (_) {
-            elements = [];
-        }
+            if (root.querySelectorAll) {
+                root.querySelectorAll('video').forEach(video => videos.add(video));
+            }
+        } catch (_) { }
 
-        elements.forEach((element) => {
+        if (!includeShadowRoots) return;
+
+        try {
+            if (!root.querySelectorAll) return;
+            root.querySelectorAll('*').forEach((element) => {
+                try {
+                    if (element.shadowRoot) {
+                        collectVideos(element.shadowRoot, videos, true);
+                    }
+                } catch (_) { }
+            });
+        } catch (_) { }
+    }
+
+    function mutationAddsVideo(mutations) {
+        let found = false;
+        mutations.forEach((mutation) => {
+            if (found) return;
+            mutation.addedNodes.forEach((node) => {
+                if (found || !node) return;
+                try {
+                    if (node instanceof HTMLVideoElement) {
+                        state.videos.add(node);
+                        found = true;
+                        return;
+                    }
+                } catch (_) { }
+                try {
+                    if (node.querySelectorAll) {
+                        const videos = node.querySelectorAll('video');
+                        videos.forEach(video => state.videos.add(video));
+                        if (videos.length > 0) {
+                            found = true;
+                        }
+                    }
+                } catch (_) { }
+                try {
+                    if (node.shadowRoot) {
+                        collectVideos(node.shadowRoot, state.videos, true);
+                        found = true;
+                    }
+                } catch (_) { }
+            });
+        });
+        return found;
+    }
+
+    function primeVideoCache() {
+        if (state.videoCachePrimed) return;
+        collectVideos(document, state.videos, true);
+        state.videoCachePrimed = true;
+    }
+
+    function rememberVideo(video) {
+        if (!video) return;
+        try {
+            if (video instanceof HTMLVideoElement) {
+                state.videos.add(video);
+            }
+        } catch (_) { }
+    }
+
+    function pruneVideoCache() {
+        Array.from(state.videos).forEach((video) => {
             try {
-                if (element instanceof HTMLVideoElement) {
-                    videos.push(element);
-                }
-            } catch (_) { }
-            try {
-                if (element.shadowRoot) {
-                    collectVideos(element.shadowRoot, videos);
+                if (!video || !video.isConnected) {
+                    state.videos.delete(video);
                 }
             } catch (_) { }
         });
     }
 
     function findVideos() {
-        const videos = [];
-        collectVideos(document, videos);
-        return Array.from(new Set(videos))
+        primeVideoCache();
+        pruneVideoCache();
+        return Array.from(state.videos)
             .filter(video => video.readyState >= 1 && !video.disablePictureInPicture)
             .sort((a, b) => Number(isPlaying(b)) - Number(isPlaying(a)));
     }
@@ -125,6 +187,7 @@
         ['play', 'playing', 'pause', 'loadedmetadata', 'loadeddata', 'canplay'].forEach((eventName) => {
             document.addEventListener(eventName, (event) => {
                 if (event.target instanceof HTMLVideoElement) {
+                    rememberVideo(event.target);
                     scheduleRefresh();
                 }
             }, true);
@@ -140,7 +203,11 @@
         }, true);
 
         try {
-            state.observer = new MutationObserver(scheduleRefresh);
+            state.observer = new MutationObserver((mutations) => {
+                if (mutationAddsVideo(mutations)) {
+                    scheduleRefresh();
+                }
+            });
             state.observer.observe(document.documentElement || document.body, {
                 childList: true,
                 subtree: true

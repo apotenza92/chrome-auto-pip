@@ -111,9 +111,29 @@
     const HIDDEN_ATTEMPT_ONCE = !!(ACTIVE_FIX && ACTIVE_FIX.visibilityHiddenAttemptOnce);
     const DEFER_CHILD_UNTIL_VIDEO = !!(ACTIVE_FIX && ACTIVE_FIX.deferChildUntilVideo);
 
-    // Find best video for PiP (deep search, visible, playing first)
-    function getEligibleVideos() {
-        let videos;
+    const observedVideos = new Set();
+    let videoCachePrimed = false;
+
+    function rememberVideos(videos) {
+        if (!Array.isArray(videos)) return;
+        videos.forEach(video => {
+            if (video) observedVideos.add(video);
+        });
+    }
+
+    function pruneObservedVideos() {
+        Array.from(observedVideos).forEach((video) => {
+            try {
+                if (!video || !video.isConnected) {
+                    observedVideos.delete(video);
+                }
+            } catch (_) { }
+        });
+    }
+
+    function primeObservedVideos() {
+        if (videoCachePrimed) return;
+        let videos = [];
         if (findAllVideos) {
             videos = findAllVideos({
                 deep: true,
@@ -125,6 +145,59 @@
             videos = Array.from(document.querySelectorAll('video'))
                 .filter(v => v.readyState >= 1);
         }
+        rememberVideos(videos);
+        videoCachePrimed = true;
+    }
+
+    function collectAddedVideos(node) {
+        const videos = [];
+        if (!node) return videos;
+        try {
+            if (node instanceof HTMLVideoElement) {
+                videos.push(node);
+            }
+        } catch (_) { }
+        try {
+            if (node.querySelectorAll) {
+                videos.push(...node.querySelectorAll('video'));
+            }
+        } catch (_) { }
+        try {
+            if (node.shadowRoot && node.shadowRoot.querySelectorAll) {
+                videos.push(...node.shadowRoot.querySelectorAll('video'));
+            }
+        } catch (_) { }
+        return videos;
+    }
+
+    function mutationAddsVideo(mutations) {
+        let found = false;
+        mutations.forEach((mutation) => {
+            if (found) return;
+            mutation.addedNodes.forEach((node) => {
+                if (found) return;
+                const videos = collectAddedVideos(node);
+                if (videos.length > 0) {
+                    rememberVideos(videos);
+                    found = true;
+                }
+            });
+        });
+        return found;
+    }
+
+    // Find best video for PiP (deep search once, then cache observed videos)
+    function getEligibleVideos() {
+        primeObservedVideos();
+        pruneObservedVideos();
+        let videos = Array.from(observedVideos)
+            .filter(v => v && typeof v.readyState === 'number' && v.readyState >= 1);
+
+        videos.sort((a, b) => {
+            const aPlaying = isPlaying ? Number(isPlaying(a)) : 0;
+            const bPlaying = isPlaying ? Number(isPlaying(b)) : 0;
+            return bPlaying - aPlaying;
+        });
         
         // Add autopictureinpicture attribute to eligible videos
         // This tells Chrome to auto-PiP when the tab becomes hidden
@@ -287,6 +360,7 @@
         ['play', 'playing', 'pause', 'loadedmetadata', 'loadeddata', 'canplay'].forEach(eventType => {
             document.addEventListener(eventType, (e) => {
                 if (e.target?.tagName === 'VIDEO') {
+                    observedVideos.add(e.target);
                     log('Video event:', eventType);
                     
                     // Check if auto-PiP has been disabled
@@ -346,7 +420,11 @@
 
         if (!window.__auto_pip_mutation_observer__) {
             try {
-                const observer = new MutationObserver(scheduleRegistrationRefresh);
+                const observer = new MutationObserver((mutations) => {
+                    if (mutationAddsVideo(mutations)) {
+                        scheduleRegistrationRefresh();
+                    }
+                });
                 observer.observe(document.documentElement || document.body, {
                     childList: true,
                     subtree: true

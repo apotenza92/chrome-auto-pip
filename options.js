@@ -227,11 +227,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         autoPipOnTabSwitchToggle.disabled = true;
 
         try {
-            await chrome.storage.sync.set({ autoPipOnTabSwitch: tabSwitchEnabled });
+            await Promise.allSettled([
+                chrome.storage.sync.set({ autoPipOnTabSwitch: tabSwitchEnabled }),
+                chrome.storage.local.set({ autoPipOnTabSwitch: tabSwitchEnabled })
+            ]);
             try {
-                await chrome.storage.local.set({ autoPipOnTabSwitch: tabSwitchEnabled });
+                chrome.runtime.sendMessage({
+                    type: 'auto_pip_set_switch_modes',
+                    autoPipOnTabSwitch: tabSwitchEnabled
+                });
             } catch (_) { }
-        } catch (_) {
         } finally {
             autoPipOnTabSwitchToggle.disabled = false;
         }

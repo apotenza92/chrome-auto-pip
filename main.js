@@ -173,6 +173,57 @@ function ensureAutoPiPAllowedForTab(tabId, callback) {
   });
 }
 
+function setAutoPiPContentSettingForUrl(url, setting, callback) {
+  const done = typeof callback === 'function' ? callback : () => { };
+  const api = getAutoPiPContentSettingApi();
+  if (!api) {
+    done({ ok: false, reason: 'contentSettingsUnavailable' });
+    return;
+  }
+
+  const primaryPattern = getPrimaryPatternForUrl(url);
+  if (!primaryPattern) {
+    done({ ok: false, reason: 'invalidPattern', url });
+    return;
+  }
+
+  api.set({ primaryPattern, setting, scope: 'regular' }, () => {
+    const error = chrome.runtime.lastError;
+    if (error) {
+      done({ ok: false, reason: error.message, primaryPattern, setting });
+      return;
+    }
+    done({ ok: true, primaryPattern, setting });
+  });
+}
+
+function blockAutoPiPForTab(tab, callback) {
+  const done = typeof callback === 'function' ? callback : () => { };
+  if (!tab || !tab.url || isRestrictedUrl(tab.url)) {
+    done({ ok: false, reason: 'invalidTab' });
+    return;
+  }
+  setAutoPiPContentSettingForUrl(tab.url, 'block', done);
+}
+
+function clearAutoPiPContentSettings(callback) {
+  const done = typeof callback === 'function' ? callback : () => { };
+  const api = getAutoPiPContentSettingApi();
+  if (!api) {
+    done({ ok: false, reason: 'contentSettingsUnavailable' });
+    return;
+  }
+
+  api.clear({ scope: 'regular' }, () => {
+    const error = chrome.runtime.lastError;
+    if (error) {
+      done({ ok: false, reason: error.message });
+      return;
+    }
+    done({ ok: true });
+  });
+}
+
 function safeExecuteScript(tabId, files, callback, options = null) {
   const allowBlocked = options && options.allowBlocked === true;
   chrome.tabs.get(tabId, (tab) => {
@@ -250,6 +301,10 @@ function injectPageClearAutoPiPScript(tabId, callback) {
   safeExecuteScript(tabId, ['./scripts/page-clear-auto-pip.js'], callback, { allowBlocked: true, world: 'MAIN' });
 }
 
+function injectPageDisableAutoPiPScript(tabId, callback) {
+  safeExecuteScript(tabId, ['./scripts/page-disable-auto-pip.js'], callback, { allowBlocked: true, world: 'MAIN' });
+}
+
 function injectTriggerAutoPiP(tabId, callback) {
   ensureAutoPiPAllowedForTab(tabId, () => {
     injectWithUtils(tabId, ['./scripts/trigger-auto-pip.js'], (results) => {
@@ -265,7 +320,7 @@ function injectCheckVideoScript(tabId, callback) {
 }
 
 function injectExitPiPScript(tabId, callback) {
-  injectWithUtils(tabId, ['./scripts/exit-pip.js'], callback);
+  safeExecuteScript(tabId, ['./scripts/utils.js', './scripts/site-fixes.js', './scripts/exit-pip.js'], callback, { allowBlocked: true });
 }
 
 function injectImmediatePiPScript(tabId, callback) {
@@ -284,8 +339,14 @@ function injectClearAutoPiPScript(tabId, callback) {
 
 function injectDisableAutoPiPScript(tabId, callback) {
   safeExecuteScript(tabId, ['./scripts/disable-auto-pip.js'], () => {
-    injectPageClearAutoPiPScript(tabId, callback);
+    injectPageDisableAutoPiPScript(tabId, callback);
   }, { allowBlocked: true });
+}
+
+function injectDisableAndExitAutoPiPScript(tabId, callback) {
+  injectDisableAutoPiPScript(tabId, () => {
+    injectExitPiPScript(tabId, callback);
+  });
 }
 
 function registerTabForAutoPip(tabId, callback) {
@@ -309,13 +370,62 @@ function registerAutoPipOnAllTabs() {
 }
 
 function clearAutoPipOnAllTabs() {
+  clearAutoPiPContentSettings(() => {
+    chrome.tabs.query({}, (tabs) => {
+      if (!tabs) return;
+      tabs.forEach(tab => {
+        if (isRestrictedUrl(tab.url)) return;
+        if (!isAutoPipAllowedTab(tab)) {
+          blockAutoPiPForTab(tab, () => { });
+        }
+      });
+    });
+  });
+
   chrome.tabs.query({}, (tabs) => {
     if (!tabs) return;
     tabs.forEach(tab => {
       if (isRestrictedUrl(tab.url)) return;
-      injectClearAutoPiPScript(tab.id, () => { });
+      injectDisableAndExitAutoPiPScript(tab.id, () => { });
     });
   });
+}
+
+function primeActiveTabForAutoPip() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const activeTab = tabs && tabs.length > 0 ? tabs[0] : null;
+    if (!isValidTab(activeTab) || !isAutoPipAllowedTab(activeTab)) return;
+    registerTabForAutoPip(activeTab.id, () => { });
+    injectCheckVideoScript(activeTab.id, (results) => {
+      if (!hasAnyFrameTrue(results)) return;
+      setTargetTab(activeTab.id);
+      currentTab = activeTab.id;
+    });
+  });
+}
+
+function applyAutoPipOnTabSwitchSetting(nextValue, options = {}) {
+  if (typeof nextValue !== 'boolean') return;
+
+  const changed = autoPipOnTabSwitch !== nextValue;
+  autoPipOnTabSwitch = nextValue;
+
+  if (options.mirrorLocal === true) {
+    try { chrome.storage.local.set({ autoPipOnTabSwitch }); } catch (_) { }
+  }
+
+  if (autoPipOnTabSwitch) {
+    registerAutoPipOnAllTabs();
+    primeActiveTabForAutoPip();
+    return;
+  }
+
+  clearAutoPipOnAllTabs();
+  setTargetTab(null);
+  pipActiveTab = null;
+  if (changed) {
+    prevTab = null;
+  }
 }
 
 function applyBlocklistToAllTabs() {
@@ -325,7 +435,9 @@ function applyBlocklistToAllTabs() {
       if (!isValidTab(tab)) return;
       const allowed = isAutoPipAllowedTab(tab);
       if (!allowed) {
-        injectDisableAutoPiPScript(tab.id, () => { });
+        blockAutoPiPForTab(tab, () => {
+          injectDisableAutoPiPScript(tab.id, () => { });
+        });
         if (targetTab === tab.id) setTargetTab(null);
         if (pipActiveTab === tab.id) pipActiveTab = null;
         return;
@@ -464,31 +576,16 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace !== 'sync' && namespace !== 'local') return;
 
-  if (namespace === 'sync' && (changes.autoPipOnTabSwitch || changes.autoPipEnabled)) {
-    const nextValue = changes.autoPipOnTabSwitch
-      ? changes.autoPipOnTabSwitch.newValue !== false
-      : changes.autoPipEnabled.newValue !== false;
+  if (changes.autoPipOnTabSwitch || changes.autoPipEnabled) {
+    const nextValue = changes.autoPipOnTabSwitch && typeof changes.autoPipOnTabSwitch.newValue === 'boolean'
+      ? changes.autoPipOnTabSwitch.newValue
+      : changes.autoPipEnabled && typeof changes.autoPipEnabled.newValue === 'boolean'
+        ? changes.autoPipEnabled.newValue
+        : null;
 
-    autoPipOnTabSwitch = nextValue;
-    try { chrome.storage.local.set({ autoPipOnTabSwitch }); } catch (_) { }
-
-    if (autoPipOnTabSwitch) {
-      registerAutoPipOnAllTabs();
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const activeTab = tabs && tabs.length > 0 ? tabs[0] : null;
-        if (!isValidTab(activeTab) || !isAutoPipAllowedTab(activeTab)) return;
-        registerTabForAutoPip(activeTab.id, () => { });
-        injectCheckVideoScript(activeTab.id, (results) => {
-          if (!hasAnyFrameTrue(results)) return;
-          setTargetTab(activeTab.id);
-          currentTab = activeTab.id;
-        });
-      });
-    } else {
-      clearAutoPipOnAllTabs();
-      setTargetTab(null);
-      pipActiveTab = null;
-    }
+    applyAutoPipOnTabSwitchSetting(nextValue, {
+      mirrorLocal: namespace === 'sync'
+    });
   }
 
   if (changes.autoPipSiteBlocklist) {
@@ -610,7 +707,9 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
     if (!tab || !tab.url || isRestrictedUrl(tab.url)) return;
 
     if (!isAutoPipAllowedTab(tab)) {
-      injectDisableAutoPiPScript(tabId, () => { });
+      blockAutoPiPForTab(tab, () => {
+        injectDisableAutoPiPScript(tabId, () => { });
+      });
       return;
     }
 
@@ -636,7 +735,7 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
         const nextSettings = {
           autoPipOnTabSwitch: message.autoPipOnTabSwitch !== false
         };
-        autoPipOnTabSwitch = nextSettings.autoPipOnTabSwitch;
+        applyAutoPipOnTabSwitchSetting(nextSettings.autoPipOnTabSwitch);
         Promise.allSettled([
           chrome.storage.sync.set(nextSettings),
           chrome.storage.local.set(nextSettings)

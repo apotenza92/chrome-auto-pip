@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>High Churn Video</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: #101114;
+      color: #f5f5f5;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 720px) 1fr;
+      gap: 16px;
+      padding: 16px;
+    }
+
+    video {
+      width: 100%;
+      background: #000;
+    }
+
+    #churn {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(24px, 1fr));
+      gap: 4px;
+      align-content: start;
+      max-height: 80vh;
+      overflow: hidden;
+    }
+
+    .tile {
+      height: 18px;
+      background: hsl(var(--hue), 70%, 52%);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <video controls muted loop playsinline src="/sample.mp4"></video>
+      <p>Fixture that mimics a video site with frequent surrounding DOM churn.</p>
+    </section>
+    <section id="churn" aria-label="churn area"></section>
+  </main>
+
+  <script>
+    const video = document.querySelector('video');
+    const churn = document.getElementById('churn');
+    let tick = 0;
+
+    video.play().catch(() => {});
+
+    function mutate() {
+      tick += 1;
+      const fragment = document.createDocumentFragment();
+      for (let i = 0; i < 48; i += 1) {
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.style.setProperty('--hue', String((tick * 13 + i * 17) % 360));
+        tile.textContent = String(tick);
+        fragment.appendChild(tile);
+      }
+      churn.replaceChildren(fragment);
+      window.__churn_tick__ = tick;
+    }
+
+    mutate();
+    window.__churn_interval__ = setInterval(mutate, 50);
+  </script>
+</body>
+</html>

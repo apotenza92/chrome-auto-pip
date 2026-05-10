@@ -7,6 +7,8 @@
   },
   "scripts": {
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:preupdate": "node tmp/orchestrator/scripts/pre-update-e2e.js",
+    "test:e2e:footage": "node tmp/orchestrator/scripts/capture-vm-footage.js"
   }
 }
