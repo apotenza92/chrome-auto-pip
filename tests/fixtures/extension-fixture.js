@@ -14,14 +14,52 @@ if (configuredBrowser !== 'chromium') {
 
 async function waitForExtensionWorker(context, timeoutMs = 45000) {
   const startedAt = Date.now();
+  let wakePage = null;
+  let nextWakeAt = 0;
+
+  const wakeExtensionWorker = async () => {
+    try {
+      if (!wakePage || wakePage.isClosed()) {
+        wakePage = await context.newPage();
+      }
+      await wakePage.goto(`data:text/html,<title>Auto%20PiP%20worker%20wake</title>${Date.now()}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 5000
+      });
+    } catch (_) {
+      if (wakePage && !wakePage.isClosed()) {
+        await wakePage.close().catch(() => {});
+      }
+      wakePage = null;
+    }
+  };
+
   while ((Date.now() - startedAt) < timeoutMs) {
     const existing = context.serviceWorkers()[0];
-    if (existing) return existing;
+    if (existing) {
+      if (wakePage && !wakePage.isClosed()) {
+        await wakePage.close().catch(() => {});
+      }
+      return existing;
+    }
+
+    if (Date.now() >= nextWakeAt) {
+      await wakeExtensionWorker();
+      nextWakeAt = Date.now() + 5000;
+    }
+
     try {
-      return await context.waitForEvent('serviceworker', { timeout: 1000 });
+      const worker = await context.waitForEvent('serviceworker', { timeout: 1000 });
+      if (wakePage && !wakePage.isClosed()) {
+        await wakePage.close().catch(() => {});
+      }
+      return worker;
     } catch (_) {
       // Keep polling until the overall timeout expires.
     }
+  }
+  if (wakePage && !wakePage.isClosed()) {
+    await wakePage.close().catch(() => {});
   }
   throw new Error(`Timed out waiting for extension service worker after ${timeoutMs}ms`);
 }

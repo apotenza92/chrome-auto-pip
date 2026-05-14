@@ -10,7 +10,10 @@
         refreshTimer: null,
         observer: null,
         videos: new Set(),
-        videoCachePrimed: false
+        videoCachePrimed: false,
+        lastDeepScanAt: 0,
+        refreshDueAt: 0,
+        lastMutationVideoCheckAt: 0
     };
     window.__auto_pip_page_state__ = state;
     if (!(state.videos instanceof Set)) {
@@ -19,6 +22,10 @@
     window.__auto_pip_page_disabled__ = false;
 
     const isDisabled = () => window.__auto_pip_page_disabled__ === true;
+    const DEEP_RESCAN_THROTTLE_MS = 1000;
+    const MUTATION_VIDEO_CHECK_THROTTLE_MS = 1000;
+    const REFRESH_DELAY_MS = 100;
+    const GENERIC_MUTATION_REFRESH_DELAY_MS = 1000;
     let hiddenAttemptToken = 0;
 
     function isPlaying(video) {
@@ -86,10 +93,18 @@
         return found;
     }
 
-    function primeVideoCache() {
-        if (state.videoCachePrimed) return;
+    function primeVideoCache(force) {
+        const now = Date.now();
+        if (
+            state.videoCachePrimed &&
+            !force &&
+            (now - (state.lastDeepScanAt || 0)) < DEEP_RESCAN_THROTTLE_MS
+        ) {
+            return;
+        }
         collectVideos(document, state.videos, true);
         state.videoCachePrimed = true;
+        state.lastDeepScanAt = now;
     }
 
     function rememberVideo(video) {
@@ -111,17 +126,17 @@
         });
     }
 
-    function findVideos() {
-        primeVideoCache();
+    function findVideos(options = {}) {
+        primeVideoCache(options.forceScan === true);
         pruneVideoCache();
         return Array.from(state.videos)
             .filter(video => video.readyState >= 1 && !video.disablePictureInPicture)
             .sort((a, b) => Number(isPlaying(b)) - Number(isPlaying(a)));
     }
 
-    function updateVideos() {
+    function updateVideos(options = {}) {
         if (isDisabled()) return [];
-        const videos = findVideos();
+        const videos = findVideos(options);
         videos.forEach((video) => {
             try {
                 video.setAttribute('autopictureinpicture', '');
@@ -131,9 +146,9 @@
         return videos;
     }
 
-    async function enterPictureInPicture() {
+    async function enterPictureInPicture(options = {}) {
         if (isDisabled() || document.pictureInPictureElement) return false;
-        const videos = updateVideos();
+        const videos = updateVideos(options);
         const video = videos.find(isPlaying) || videos[0];
         if (!video || typeof video.requestPictureInPicture !== 'function') {
             return false;
@@ -149,38 +164,44 @@
         const token = hiddenAttemptToken + 1;
         hiddenAttemptToken = token;
 
-        [0, 100, 250, 500, 1000].forEach((delay) => {
+        [0, 100, 250, 500, 1000, 2000, 4000, 7000].forEach((delay) => {
             setTimeout(() => {
                 if (hiddenAttemptToken !== token) return;
                 if (document.visibilityState !== 'hidden') return;
                 if (document.pictureInPictureElement) return;
-                enterPictureInPicture();
+                enterPictureInPicture({ forceScan: true });
             }, delay);
         });
     }
 
-    function updatePlaybackState() {
+    function updatePlaybackState(options = {}) {
         if (isDisabled()) return;
-        const videos = updateVideos();
+        const videos = updateVideos(options);
         try {
             navigator.mediaSession.playbackState = videos.some(isPlaying) ? 'playing' : 'paused';
         } catch (_) { }
     }
 
-    function registerHandler() {
+    function registerHandler(options = {}) {
         if (isDisabled()) return;
         try {
             navigator.mediaSession.setActionHandler('enterpictureinpicture', enterPictureInPicture);
         } catch (_) { }
-        updatePlaybackState();
+        updatePlaybackState(options);
     }
 
-    function scheduleRefresh() {
-        if (state.refreshTimer != null) return;
+    function scheduleRefresh(delay = REFRESH_DELAY_MS) {
+        const dueAt = Date.now() + delay;
+        if (state.refreshTimer != null) {
+            if (dueAt >= (state.refreshDueAt || 0)) return;
+            clearTimeout(state.refreshTimer);
+        }
+        state.refreshDueAt = dueAt;
         state.refreshTimer = setTimeout(() => {
             state.refreshTimer = null;
+            state.refreshDueAt = 0;
             registerHandler();
-        }, 100);
+        }, delay);
     }
 
     if (!state.registered) {
@@ -194,7 +215,7 @@
         });
 
         document.addEventListener('visibilitychange', () => {
-            registerHandler();
+            registerHandler({ forceScan: true });
             if (document.visibilityState === 'hidden') {
                 attemptHiddenPictureInPicture();
             } else {
@@ -204,9 +225,18 @@
 
         try {
             state.observer = new MutationObserver((mutations) => {
-                if (mutationAddsVideo(mutations)) {
-                    scheduleRefresh();
+                const now = Date.now();
+                const canCheckForVideos = (now - (state.lastMutationVideoCheckAt || 0)) >= MUTATION_VIDEO_CHECK_THROTTLE_MS;
+                if (canCheckForVideos) {
+                    state.lastMutationVideoCheckAt = now;
                 }
+                if (canCheckForVideos && mutationAddsVideo(mutations)) {
+                    scheduleRefresh();
+                    return;
+                }
+                // Some players create video early, then wire source/shadow state
+                // through surrounding DOM churn. Rescan, but keep it throttled.
+                scheduleRefresh(GENERIC_MUTATION_REFRESH_DELAY_MS);
             });
             state.observer.observe(document.documentElement || document.body, {
                 childList: true,

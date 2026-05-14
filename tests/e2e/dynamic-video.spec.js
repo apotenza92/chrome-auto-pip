@@ -132,3 +132,86 @@ test('tab switch enters PiP for dynamically-created player video', async ({ cont
     server.close();
   }
 });
+
+test('registration refreshes when an existing shadow video becomes ready during player churn', async ({ context }) => {
+  test.setTimeout(120000);
+
+  const worker = context.__autoPipExtensionWorker || context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  const { server, baseURL } = await startStaticServer();
+  const videoUrl = `${baseURL}/shadow-late-ready-video.html`;
+
+  const createTab = async () => {
+    return worker.evaluate(async (url) => {
+      const waitForTabComplete = (tabId) => new Promise(resolve => {
+        chrome.tabs.get(tabId, (tab) => {
+          if (tab && tab.status === 'complete') return resolve();
+          const listener = (updatedId, info) => {
+            if (updatedId === tabId && info.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+        });
+      });
+
+      const tab = await new Promise(resolve => {
+        chrome.tabs.create({ url, active: true }, resolve);
+      });
+
+      if (tab && tab.id != null) {
+        await waitForTabComplete(tab.id);
+      }
+
+      return tab ? tab.id : null;
+    }, videoUrl);
+  };
+
+  const getFlags = async (tabId) => {
+    return worker.evaluate(async (id) => {
+      const result = await chrome.scripting.executeScript({
+        target: { tabId: id },
+        world: 'MAIN',
+        func: () => {
+          const host = document.getElementById('host');
+          const video = host && host.shadowRoot ? host.shadowRoot.querySelector('video') : null;
+          return {
+            hasVideo: !!video,
+            started: window.__shadow_late_ready_started__ === true,
+            churnTick: window.__shadow_late_ready_tick__ || 0,
+            playing: !!video && !video.paused && !video.ended && video.readyState >= 2,
+            autoPipAttr: !!video && video.hasAttribute('autopictureinpicture'),
+            playbackState: navigator.mediaSession ? navigator.mediaSession.playbackState : null
+          };
+        }
+      });
+
+      return result && result[0] ? result[0].result : {
+        hasVideo: false,
+        started: false,
+        churnTick: 0,
+        playing: false,
+        autoPipAttr: false,
+        playbackState: null
+      };
+    }, tabId);
+  };
+
+  let tabId = null;
+  try {
+    tabId = await createTab();
+    await expect.poll(async () => getFlags(tabId), { timeout: 15000 }).toMatchObject({
+      hasVideo: true,
+      started: true,
+      playing: true,
+      autoPipAttr: true,
+      playbackState: 'playing'
+    });
+    expect((await getFlags(tabId)).churnTick).toBeGreaterThan(0);
+  } finally {
+    if (tabId != null) {
+      await worker.evaluate((id) => chrome.tabs.remove(id), tabId).catch(() => {});
+    }
+    server.close();
+  }
+});

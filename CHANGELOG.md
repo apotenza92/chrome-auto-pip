@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.7.4] - 2026-05-14
+
+### Fixed
+- Restored reliable Auto PiP activation for Windows tab-switch flows after the v1.7.2 CPU optimization changed dynamic-video discovery timing.
+- Improved handling for late-ready and shadow-DOM video players while keeping deep video scans throttled.
+- Preserved disabled-site behavior for Google Meet, Zoom, and other excluded sites after the Chrome Web Store rollback consumed version 1.7.3.
+
+### Changed
+- Continued CPU tuning by caching discovered videos, throttling generic DOM-churn refreshes, and avoiding isolated-script refreshes for unrelated mutations.
+- Added Parallels Windows visible-browser validation for a normal YouTube/news/third-tab browsing flow.
+
 ## [1.7.2] - 2026-05-10
 
 ### Fixed

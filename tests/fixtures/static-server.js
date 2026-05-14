@@ -47,6 +47,20 @@ function startStaticServer() {
         return;
       }
 
+      if (req.url === '/shadow-late-ready-video.html') {
+        const filePath = path.resolve(__dirname, 'shadow-late-ready-video.html');
+        fs.readFile(filePath, (err, data) => {
+          if (err) {
+            res.statusCode = 500;
+            res.end('Failed to read fixture');
+            return;
+          }
+          res.setHeader('Content-Type', 'text/html');
+          res.end(data);
+        });
+        return;
+      }
+
       if (req.url === '/blank.html') {
         res.setHeader('Content-Type', 'text/html');
         res.end('<!doctype html><title>Blank Target</title><body style="font-family:sans-serif;padding:48px"><h1>Blank Target</h1><p>Auto PiP should be visible after switching here.</p></body>');

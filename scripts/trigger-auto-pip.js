@@ -103,7 +103,7 @@
 
     // Get shared utilities (injected before this script)
     const utils = window.__auto_pip_utils__ || {};
-    const { findAllVideos, isPlaying, requestPiP, getActiveSiteFix } = utils;
+    const { collectVideosDeep, isPlaying, requestPiP, getActiveSiteFix } = utils;
 
     // Get site-specific fix configuration
     const ACTIVE_FIX = getActiveSiteFix ? getActiveSiteFix() : null;
@@ -113,6 +113,12 @@
 
     const observedVideos = new Set();
     let videoCachePrimed = false;
+    let lastDeepScanAt = 0;
+    let lastMutationVideoCheckAt = 0;
+    let refreshDueAt = 0;
+    const DEEP_RESCAN_THROTTLE_MS = 1000;
+    const MUTATION_VIDEO_CHECK_THROTTLE_MS = 1000;
+    const REFRESH_DELAY_MS = 100;
 
     function rememberVideos(videos) {
         if (!Array.isArray(videos)) return;
@@ -131,22 +137,30 @@
         });
     }
 
-    function primeObservedVideos() {
-        if (videoCachePrimed) return;
+    function findVideosDeep() {
         let videos = [];
-        if (findAllVideos) {
-            videos = findAllVideos({
-                deep: true,
-                minReadyState: 1,
-                visibleOnly: false,
-                playingFirst: true
-            });
+        if (collectVideosDeep) {
+            videos = collectVideosDeep(document);
         } else {
             videos = Array.from(document.querySelectorAll('video'))
-                .filter(v => v.readyState >= 1);
+                .filter(Boolean);
         }
+        return videos;
+    }
+
+    function primeObservedVideos(force) {
+        const now = Date.now();
+        if (
+            videoCachePrimed &&
+            !force &&
+            (now - lastDeepScanAt) < DEEP_RESCAN_THROTTLE_MS
+        ) {
+            return;
+        }
+        const videos = findVideosDeep();
         rememberVideos(videos);
         videoCachePrimed = true;
+        lastDeepScanAt = now;
     }
 
     function collectAddedVideos(node) {
@@ -187,8 +201,8 @@
     }
 
     // Find best video for PiP (deep search once, then cache observed videos)
-    function getEligibleVideos() {
-        primeObservedVideos();
+    function getEligibleVideos(options = {}) {
+        primeObservedVideos(options.forceScan === true);
         pruneObservedVideos();
         let videos = Array.from(observedVideos)
             .filter(v => v && typeof v.readyState === 'number' && v.readyState >= 1);
@@ -240,7 +254,7 @@
                 return;
             }
             
-            const candidates = getEligibleVideos();
+            const candidates = getEligibleVideos({ forceScan: true });
             log('Found candidates:', candidates.length, candidates.map(v => ({ paused: v.paused, readyState: v.readyState })));
             
             if (candidates.length === 0) {
@@ -304,14 +318,14 @@
         });
 
         // Sync playbackState with video state
-        function updatePlaybackState() {
+        function updatePlaybackState(options = {}) {
             // Check if auto-PiP has been disabled
             if (isDisabled()) {
                 log('updatePlaybackState: Auto-PiP is disabled, skipping');
                 return;
             }
             
-            const candidates = getEligibleVideos();
+            const candidates = getEligibleVideos(options);
             const playingVideo = isPlaying ? candidates.find(isPlaying) : null;
             const hasPlaying = !!playingVideo;
             const newState = hasPlaying ? 'playing' : 'paused';
@@ -335,23 +349,29 @@
             video.addEventListener('leavepictureinpicture', () => notifyPiPState(false));
         };
 
-        const refreshAutoPipRegistration = () => {
+        const refreshAutoPipRegistration = (options = {}) => {
             if (isDisabled()) return;
-            const candidates = getEligibleVideos();
+            const candidates = getEligibleVideos(options);
             candidates.forEach(attachPiPStateBridge);
             try {
                 navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
             } catch (_) { }
-            updatePlaybackState();
+            updatePlaybackState(options);
         };
 
         let refreshTimer = null;
-        const scheduleRegistrationRefresh = () => {
-            if (refreshTimer != null) return;
+        const scheduleRegistrationRefresh = (delay = REFRESH_DELAY_MS) => {
+            const dueAt = Date.now() + delay;
+            if (refreshTimer != null) {
+                if (dueAt >= refreshDueAt) return;
+                clearTimeout(refreshTimer);
+            }
+            refreshDueAt = dueAt;
             refreshTimer = setTimeout(() => {
                 refreshTimer = null;
+                refreshDueAt = 0;
                 refreshAutoPipRegistration();
-            }, 100);
+            }, delay);
         };
 
         window.__auto_pip_refresh__ = refreshAutoPipRegistration;
@@ -375,7 +395,7 @@
                         log('Added autopictureinpicture on', eventType);
                     }
                     attachPiPStateBridge(e.target);
-                    updatePlaybackState();
+                    updatePlaybackState({ forceScan: true });
                 }
             }, true);
         });
@@ -407,7 +427,7 @@
             } else if (document.visibilityState === 'hidden') {
                 // Tab becoming hidden - ensure MediaSession is properly set for auto-PiP
                 log('Tab becoming hidden, ensuring MediaSession is ready');
-                const candidates = getEligibleVideos();
+                const candidates = getEligibleVideos({ forceScan: true });
                 if (isPlaying && candidates.some(isPlaying)) {
                     navigator.mediaSession.playbackState = 'playing';
                     navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
@@ -421,8 +441,14 @@
         if (!window.__auto_pip_mutation_observer__) {
             try {
                 const observer = new MutationObserver((mutations) => {
-                    if (mutationAddsVideo(mutations)) {
+                    const now = Date.now();
+                    const canCheckForVideos = (now - lastMutationVideoCheckAt) >= MUTATION_VIDEO_CHECK_THROTTLE_MS;
+                    if (canCheckForVideos) {
+                        lastMutationVideoCheckAt = now;
+                    }
+                    if (canCheckForVideos && mutationAddsVideo(mutations)) {
                         scheduleRegistrationRefresh();
+                        return;
                     }
                 });
                 observer.observe(document.documentElement || document.body, {

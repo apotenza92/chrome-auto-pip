@@ -32,7 +32,10 @@ const STAGE_TIMEOUT_MULTIPLIER = {
   'linux-app-focus-contract-probe': 3,
   'scenario-window-switch': 3,
   'scenario-app-switch': 3,
-  'playwright-extension-e2e': 8
+  'playwright-extension-e2e': 8,
+  'dynamic-video-consistency': 10,
+  'real-browser-use-youtube': 6,
+  'visible-real-browser-use-youtube': 6
 };
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const ACTIVE_TARGET_KEYS = ['windows', 'fedora', 'macosTahoe'];
@@ -863,6 +866,42 @@ class HostOrchestrator {
         'display-stack-probe',
         'interactive-desktop-probe',
         'playwright-extension-e2e'
+      ];
+    }
+
+    if (this.options.flow === 'dynamic-video-consistency') {
+      return [
+        'guest-prereq-probe',
+        'sync',
+        'env-probe',
+        'playwright-browser-probe',
+        'display-stack-probe',
+        'interactive-desktop-probe',
+        'dynamic-video-consistency'
+      ];
+    }
+
+    if (this.options.flow === 'real-browser-use-youtube') {
+      return [
+        'guest-prereq-probe',
+        'sync',
+        'env-probe',
+        'playwright-browser-probe',
+        'display-stack-probe',
+        'interactive-desktop-probe',
+        'real-browser-use-youtube'
+      ];
+    }
+
+    if (this.options.flow === 'visible-real-browser-use-youtube') {
+      return [
+        'guest-prereq-probe',
+        'sync',
+        'env-probe',
+        'playwright-browser-probe',
+        'display-stack-probe',
+        'interactive-desktop-probe',
+        'visible-real-browser-use-youtube'
       ];
     }
 
