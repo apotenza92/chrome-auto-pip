@@ -12,6 +12,8 @@ const { getLinuxDesktopSessionContext } = require('./linux-desktop-session');
 const MARKER = '__AUTO_PIP_RESULT__=';
 const STAGE_TIMEOUT_MS = 120000;
 const VM_BOOT_TIMEOUT_MS = 6 * 60 * 1000;
+const VM_READY_MAX_ATTEMPTS = 3;
+const VM_STOPPING_SETTLE_MS = 60 * 1000;
 const STAGE_TIMEOUT_MULTIPLIER = {
   'guest-deps-install': 8,
   'guest-linux-desktop-tools-install': 8,
@@ -35,7 +37,8 @@ const STAGE_TIMEOUT_MULTIPLIER = {
   'playwright-extension-e2e': 8,
   'dynamic-video-consistency': 10,
   'real-browser-use-youtube': 6,
-  'visible-real-browser-use-youtube': 6
+  'visible-real-browser-use-youtube': 6,
+  'helium-youtube-disable': 8
 };
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const ACTIVE_TARGET_KEYS = ['windows', 'fedora', 'macosTahoe'];
@@ -55,6 +58,7 @@ function parseArgs(argv) {
     runtimeRoot: null,
     browserChannel: null,
     browserExecutable: null,
+    extensionPath: null,
     repeat: 1,
     startVm: true,
     suspendAfterRun: false,
@@ -90,6 +94,7 @@ function parseArgs(argv) {
     if (key === 'timeout-scale') options.timeoutScale = parseFloat(value) || 1;
     if (key === 'browser-channel') options.browserChannel = value;
     if (key === 'browser-executable') options.browserExecutable = value;
+    if (key === 'extension-path') options.extensionPath = value;
     if (key === 'repeat') options.repeat = Math.max(1, parseInt(value, 10) || 1);
     if (key === 'boot-timeout-ms') options.bootTimeoutMs = Math.max(1000, parseInt(value, 10) || VM_BOOT_TIMEOUT_MS);
   });
@@ -231,6 +236,7 @@ async function acquireVmRunLock(details) {
       if (error.code !== 'EEXIST') throw error;
       const currentLock = readVmRunLock();
       if (!currentLock || !isProcessAlive(currentLock.pid)) {
+        console.error(`[vm-lock] clearing stale lock at ${VM_RUN_LOCK_PATH}: ${JSON.stringify(currentLock || {})}`);
         try {
           fs.unlinkSync(VM_RUN_LOCK_PATH);
         } catch (unlinkError) {
@@ -272,6 +278,25 @@ function getVmRecord(vmName) {
   return listVms().find((vm) => vm && vm.name === vmName) || null;
 }
 
+function getVmInfoText(vmName) {
+  const result = runLocal('prlctl', ['list', '--info', vmName], { timeout: 30 * 1000 });
+  if (result.status !== 0) {
+    return '';
+  }
+  return result.stdout || '';
+}
+
+function getGuestToolsState(vmName) {
+  const info = getVmInfoText(vmName);
+  const toolsMatch = info.match(/GuestTools:\s*state=([^\s]+)/);
+  const ipMatch = info.match(/IP Addresses:\s*(.*)/);
+  return {
+    toolsState: toolsMatch ? toolsMatch[1] : null,
+    ipAddresses: ipMatch ? ipMatch[1].trim() : null,
+    raw: info
+  };
+}
+
 function suspendOtherActiveTargetVms(currentTarget) {
   const currentVmName = currentTarget && currentTarget.vmName;
   const managedTargets = ACTIVE_TARGET_KEYS
@@ -303,6 +328,41 @@ function waitForVmStatus(vmName, statuses, timeoutMs) {
     runLocal('sleep', ['2']);
   }
   return getVmRecord(vmName);
+}
+
+function isParallelsGuestSessionError(error) {
+  const message = String(error && (error.stack || error.message) || error || '');
+  return /prlctl exec failed \(255\)/i.test(message) ||
+    /Unable to open new session in this virtual machine/i.test(message);
+}
+
+function isRetryableGuestReadyError(error) {
+  const message = String(error && (error.stack || error.message) || error || '');
+  return isParallelsGuestSessionError(error) ||
+    /Timed out waiting for guest '.+' to become reachable/i.test(message);
+}
+
+function isMacosLoginRequired(target) {
+  if (!target || target.guestFamily !== 'macos') return false;
+  const tools = getGuestToolsState(target.vmName);
+  const hasIp = !!(tools.ipAddresses && tools.ipAddresses !== '-');
+  return tools.toolsState === 'not_installed' && !hasIp;
+}
+
+function forceStopVm(target, reason = 'restart recovery') {
+  const before = getVmRecord(target.vmName);
+  const result = runLocal('prlctl', ['stop', target.vmName, '--kill'], { timeout: 2 * 60 * 1000 });
+  if (result.status !== 0) {
+    throw new Error(`Failed to force-stop VM '${target.vmName}' (${reason})\n${result.stdout}${result.stderr}`.trim());
+  }
+  const after = waitForVmStatus(target.vmName, ['stopped'], 60 * 1000);
+  return {
+    action: 'stop-kill',
+    reason,
+    stdout: (result.stdout || '').trim(),
+    before,
+    after
+  };
 }
 
 function closeVm(target, reason = 'after run') {
@@ -384,16 +444,39 @@ async function ensureVmRunning(target, timeoutMs) {
     throw new Error(`Parallels VM '${target.vmName}' not found`);
   }
 
+  const preflightActions = [];
+
+  if (existing.status === 'stopping') {
+    const settled = waitForVmStatus(target.vmName, ['stopped', 'running'], VM_STOPPING_SETTLE_MS);
+    if (settled && settled.status !== 'stopping') {
+      preflightActions.push({
+        action: 'wait-stopping',
+        before: existing,
+        after: settled
+      });
+      existing = settled;
+    } else {
+      const stopped = forceStopVm(target, 'stopping-state recovery before start');
+      preflightActions.push(stopped);
+      existing = stopped.after || getVmRecord(target.vmName);
+    }
+  }
+
   if (target.guestFamily === 'macos' && existing.status === 'suspended') {
     const dropResult = runLocal('prlctl', ['stop', target.vmName, '--drop-state'], { timeout: 2 * 60 * 1000 });
     if (dropResult.status !== 0) {
       throw new Error(`Failed to drop stale suspended state for VM '${target.vmName}'\n${dropResult.stdout}${dropResult.stderr}`.trim());
     }
+    preflightActions.push({
+      action: 'drop-state',
+      before: existing,
+      stdout: (dropResult.stdout || '').trim()
+    });
     existing = getVmRecord(target.vmName);
   }
 
   if (existing.status === 'running') {
-    return { started: false, status: existing.status };
+    return { started: false, status: existing.status, preflightActions };
   }
 
   const startResult = runLocal('prlctl', ['start', target.vmName]);
@@ -405,7 +488,12 @@ async function ensureVmRunning(target, timeoutMs) {
   while ((Date.now() - startedAt) < timeoutMs) {
     const current = getVmRecord(target.vmName);
     if (current && current.status === 'running') {
-      return { started: true, status: current.status, stdout: startResult.stdout.trim() };
+      return {
+        started: true,
+        status: current.status,
+        stdout: startResult.stdout.trim(),
+        preflightActions
+      };
     }
     await sleep(2000);
   }
@@ -721,6 +809,7 @@ function buildGuestStageCommand(target, stageName, stageArtifactDir, options) {
   ];
   if (options.browserChannel) cliArgs.push(`--browser-channel=${options.browserChannel}`);
   if (options.browserExecutable) cliArgs.push(`--browser-executable=${options.browserExecutable}`);
+  if (options.extensionPath) cliArgs.push(`--extension-path=${options.extensionPath}`);
   if (options.timeoutScale !== 1) cliArgs.push(`--timeout-scale=${options.timeoutScale}`);
   if (options.hostStageStartedAt) cliArgs.push(`--host-stage-started-at=${options.hostStageStartedAt}`);
   if (options.hostStageStartedEpochMs != null) cliArgs.push(`--host-stage-started-epoch-ms=${options.hostStageStartedEpochMs}`);
@@ -905,6 +994,18 @@ class HostOrchestrator {
       ];
     }
 
+    if (this.options.flow === 'helium-youtube-disable') {
+      return [
+        'guest-prereq-probe',
+        'sync',
+        'env-probe',
+        'playwright-browser-probe',
+        'display-stack-probe',
+        'interactive-desktop-probe',
+        'helium-youtube-disable'
+      ];
+    }
+
     if (this.options.flow === 'visual-proof') {
       return [
         'guest-prereq-probe',
@@ -1007,28 +1108,121 @@ class HostOrchestrator {
 
   async ensureVmReady() {
     const suspendedVmNames = suspendOtherActiveTargetVms(this.target);
-    if (this.options.startVm !== false) {
-      const bootInfo = await ensureVmRunning(this.target, this.options.bootTimeoutMs);
-      this.recordStage('vm-boot', {
-        ok: true,
-        summary: bootInfo.started ? 'VM booted successfully' : 'VM was already running',
-        vmName: this.target.vmName,
-        suspendedVmNames,
-        bootInfo: {
-          ...bootInfo,
-          suspendedVmNames
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= VM_READY_MAX_ATTEMPTS; attempt += 1) {
+      let bootInfo = null;
+      try {
+        if (this.options.startVm !== false) {
+          bootInfo = await ensureVmRunning(this.target, this.options.bootTimeoutMs);
         }
-      });
+
+        if (isMacosLoginRequired(this.target)) {
+          const error = new Error(`macOS guest '${this.target.vmName}' requires interactive login before Parallels Tools exposes guest execution`);
+          error.macosLoginRequired = true;
+          this.recordStage('vm-login-required', {
+            ok: false,
+            summary: 'macOS guest is running at the login screen; Parallels Tools and prlctl exec are unavailable until the user logs in',
+            vmName: this.target.vmName,
+            guestFamily: this.target.guestFamily,
+            attempt,
+            guestTools: getGuestToolsState(this.target.vmName),
+            error: error.message
+          });
+          throw error;
+        }
+
+        const guestVersion = await waitForGuestReady(this.target, this.options.bootTimeoutMs);
+
+        if (this.options.startVm !== false) {
+          this.recordStage('vm-boot', {
+            ok: true,
+            summary: bootInfo.started ? 'VM booted successfully' : 'VM was already running',
+            vmName: this.target.vmName,
+            attempt,
+            suspendedVmNames,
+            bootInfo: {
+              ...bootInfo,
+              suspendedVmNames
+            }
+          });
+        }
+
+        this.recordStage('vm-ready', {
+          ok: true,
+          summary: 'Parallels guest command execution works',
+          guestVersion,
+          vmName: this.target.vmName,
+          guestFamily: this.target.guestFamily,
+          attempt
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (error && error.macosLoginRequired === true) {
+          throw error;
+        }
+        const retryable = isRetryableGuestReadyError(error);
+        const macosLoginRequired = isMacosLoginRequired(this.target);
+        if (macosLoginRequired) {
+          this.recordStage('vm-login-required', {
+            ok: false,
+            summary: 'macOS guest is running at the login screen; Parallels Tools and prlctl exec are unavailable until the user logs in',
+            vmName: this.target.vmName,
+            guestFamily: this.target.guestFamily,
+            attempt,
+            guestTools: getGuestToolsState(this.target.vmName),
+            lastGuestExecError: error.stack || error.message
+          });
+          throw error;
+        }
+        if (!retryable || attempt >= VM_READY_MAX_ATTEMPTS) {
+          this.recordStage('vm-ready', {
+            ok: false,
+            summary: `Parallels guest readiness failed: ${error.message}`,
+            error: error.stack || error.message,
+            vmName: this.target.vmName,
+            guestFamily: this.target.guestFamily,
+            attempt,
+            retryable
+          });
+          throw error;
+        }
+
+        let recovery = null;
+        try {
+          recovery = forceStopVm(this.target, `guest readiness retry ${attempt}`);
+        } catch (recoveryError) {
+          recovery = {
+            action: 'stop-kill',
+            ok: false,
+            error: recoveryError.stack || recoveryError.message,
+            before: getVmRecord(this.target.vmName),
+            after: getVmRecord(this.target.vmName)
+          };
+        }
+
+        this.recordStage('vm-recovery', {
+          ok: recovery && recovery.ok === false ? false : true,
+          summary: `Recovered VM after guest readiness failure; retrying (${attempt + 1}/${VM_READY_MAX_ATTEMPTS})`,
+          vmName: this.target.vmName,
+          guestFamily: this.target.guestFamily,
+          attempt,
+          nextAttempt: attempt + 1,
+          action: recovery ? recovery.action : null,
+          recovery,
+          lastGuestExecError: error.stack || error.message
+        });
+
+        if (recovery && recovery.ok === false) {
+          throw error;
+        }
+
+        await sleep(2000);
+      }
     }
 
-    const guestVersion = await waitForGuestReady(this.target, this.options.bootTimeoutMs);
-    this.recordStage('vm-ready', {
-      ok: true,
-      summary: 'Parallels guest command execution works',
-      guestVersion,
-      vmName: this.target.vmName,
-      guestFamily: this.target.guestFamily
-    });
+    throw lastError || new Error(`Failed to prepare VM '${this.target.vmName}'`);
   }
 
   runGuestPowerShellJson(script, timeout = 30000) {
@@ -1159,7 +1353,7 @@ class HostOrchestrator {
         'TMP_DIR=$(mktemp -d /tmp/pi-node-bootstrap.XXXXXX)',
         'ARCHIVE_PATH="$TMP_DIR/node.tar.gz"',
         'mkdir -p "$NODE_ROOT"',
-        'rm -rf "$NODE_ROOT"/*',
+        'find "$NODE_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +',
         'curl -fsSL "$NODE_URL" -o "$ARCHIVE_PATH"',
         'tar -xzf "$ARCHIVE_PATH" --strip-components=1 -C "$NODE_ROOT"',
         'rm -rf "$TMP_DIR"'
@@ -1393,21 +1587,24 @@ class HostOrchestrator {
       const script = [
         'set +e',
         `RUNTIME_ROOT=${quotePosix(this.target.runtimeRoot)}`,
+        `CONFIG_NODE=${quotePosix(this.target.nodeCommand || '')}`,
+        `CONFIG_NPM=${quotePosix(this.target.npmCommand || '')}`,
+        'NODE_BIN=$(command -v node 2>/dev/null || true)',
+        'NPM_BIN=$(command -v npm 2>/dev/null || true)',
+        '[ -z "$NODE_BIN" ] && [ -n "$CONFIG_NODE" ] && [ -x "$CONFIG_NODE" ] && NODE_BIN="$CONFIG_NODE"',
+        '[ -z "$NPM_BIN" ] && [ -n "$CONFIG_NPM" ] && [ -x "$CONFIG_NPM" ] && NPM_BIN="$CONFIG_NPM"',
         'printf "runtimeRoot=%s\\n" "$RUNTIME_ROOT"',
         '[ -d "$RUNTIME_ROOT" ] && echo runtimeExists=yes || echo runtimeExists=no',
         '[ -f "$RUNTIME_ROOT/package.json" ] && echo packageJson=yes || echo packageJson=no',
         '[ -f "$RUNTIME_ROOT/package-lock.json" ] && echo packageLock=yes || echo packageLock=no',
         '[ -d "$RUNTIME_ROOT/node_modules" ] && echo nodeModules=yes || echo nodeModules=no',
-        'printf "nodePath=%s\\n" "$(command -v node 2>/dev/null || true)"',
-        'printf "npmPath=%s\\n" "$(command -v npm 2>/dev/null || true)"',
-        'printf "nodeVersion=%s\\n" "$(node --version 2>/dev/null || true)"',
-        'printf "npmVersion=%s\\n" "$(npm --version 2>/dev/null || true)"',
+        'printf "nodePath=%s\\n" "$NODE_BIN"',
+        'printf "npmPath=%s\\n" "$NPM_BIN"',
+        'printf "nodeVersion=%s\\n" "$([ -n "$NODE_BIN" ] && "$NODE_BIN" --version 2>/dev/null || true)"',
+        'printf "npmVersion=%s\\n" "$([ -n "$NPM_BIN" ] && "$NPM_BIN" --version 2>/dev/null || true)"',
         '[ -f "$RUNTIME_ROOT/node_modules/@playwright/test/package.json" ] && echo playwrightInstalled=yes || echo playwrightInstalled=no',
-        'if [ -f "$RUNTIME_ROOT/node_modules/@playwright/test/package.json" ]; then',
-        '  python3 - <<PY',
-        'import json',
-        `print("playwrightVersion=" + json.load(open(${JSON.stringify(path.posix.join(this.target.runtimeRoot, 'node_modules/@playwright/test/package.json'))}))['version'])`,
-        'PY',
+        'if [ -f "$RUNTIME_ROOT/node_modules/@playwright/test/package.json" ] && [ -n "$NODE_BIN" ]; then',
+        '  "$NODE_BIN" -e "const pkg=require(process.argv[1]); console.log(`playwrightVersion=${pkg.version}`)" "$RUNTIME_ROOT/node_modules/@playwright/test/package.json"',
         'fi'
       ].join('\n');
       details = this.runGuestPosixKeyValueScript(script, 30000);
@@ -1861,6 +2058,7 @@ class HostOrchestrator {
       browser: this.options.browser || this.target.browser,
       browserChannel: this.options.browserChannel,
       browserExecutable: this.options.browserExecutable,
+      extensionPath: this.options.extensionPath,
       nodeCommand: this.target.nodeCommand,
       timeoutScale: this.options.timeoutScale,
       hostStageStartedAt,
@@ -1938,14 +2136,20 @@ class HostOrchestrator {
   }
 
   async run(runIndex = 1) {
-    await this.ensureVmReady();
+    let vmReady = true;
+    try {
+      await this.ensureVmReady();
+    } catch (_) {
+      vmReady = false;
+    }
 
-    for (const stageName of this.getPlannedStages()) {
-      try {
-        const payload = stageName === 'guest-prereq-probe'
-          ? this.probeGuestPrerequisites()
-          : stageName === 'guest-node-bootstrap'
-            ? this.bootstrapGuestNodeRuntime()
+    if (vmReady) {
+      for (const stageName of this.getPlannedStages()) {
+        try {
+          const payload = stageName === 'guest-prereq-probe'
+            ? this.probeGuestPrerequisites()
+            : stageName === 'guest-node-bootstrap'
+              ? this.bootstrapGuestNodeRuntime()
             : stageName === 'guest-runtime-probe'
               ? this.probeGuestRuntime()
               : stageName === 'guest-project-deps-probe'
@@ -1960,20 +2164,21 @@ class HostOrchestrator {
                         ? this.installGuestLinuxDesktopTools()
                         : stageName === 'guest-deps-install'
                           ? this.installGuestDependencies()
-                      : stageName === 'sync'
-                        ? this.syncRuntime()
-                        : this.runGuestStage(stageName);
+                        : stageName === 'sync'
+                          ? this.syncRuntime()
+                          : this.runGuestStage(stageName);
 
-        this.recordStage(stageName, payload);
-        if (!payload.ok && !this.shouldContinueAfterFailure(stageName)) break;
-      } catch (error) {
-        const payload = {
-          ok: false,
-          summary: `Stage failed before producing a guest result: ${error.message}`,
-          error: error.stack || error.message
-        };
-        this.recordStage(stageName, payload);
-        if (!this.shouldContinueAfterFailure(stageName)) break;
+          this.recordStage(stageName, payload);
+          if (!payload.ok && !this.shouldContinueAfterFailure(stageName)) break;
+        } catch (error) {
+          const payload = {
+            ok: false,
+            summary: `Stage failed before producing a guest result: ${error.message}`,
+            error: error.stack || error.message
+          };
+          this.recordStage(stageName, payload);
+          if (!this.shouldContinueAfterFailure(stageName)) break;
+        }
       }
     }
 

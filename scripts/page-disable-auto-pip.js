@@ -3,6 +3,15 @@
 (function pageDisableAutoPiP() {
     'use strict';
 
+    try {
+        if (typeof window.__auto_pip_page_disable__ === 'function') {
+            return window.__auto_pip_page_disable__({
+                clearMediaSession: false,
+                disconnectObserver: false
+            });
+        }
+    } catch (_) { }
+
     window.__auto_pip_page_disabled__ = true;
 
     try {

@@ -65,6 +65,13 @@ function clearAutoPiPHandlers() {
             }
         } catch (_) { }
 
+        try {
+            if (window.__auto_pip_heartbeat_timer__) {
+                clearInterval(window.__auto_pip_heartbeat_timer__);
+                try { delete window.__auto_pip_heartbeat_timer__; } catch (_) { window.__auto_pip_heartbeat_timer__ = null; }
+            }
+        } catch (_) { }
+
         // If we patched MediaSession to chain handlers, remove that marker too
         try {
             if (navigator.mediaSession && navigator.mediaSession.__auto_pip_patched__) {

@@ -31,6 +31,7 @@ const STAGES = {
   'dynamic-video-consistency': './guest/stages/dynamic-video-consistency',
   'real-browser-use-youtube': './guest/stages/real-browser-use-youtube',
   'visible-real-browser-use-youtube': './guest/stages/visible-real-browser-use-youtube',
+  'helium-youtube-disable': './guest/stages/helium-youtube-disable',
   'video-probe': './guest/stages/video-probe',
   'manual-pip-probe': './guest/stages/manual-pip-probe',
   'browser-autopip-probe': './guest/stages/browser-autopip-probe',
@@ -54,6 +55,7 @@ function parseArgs(argv) {
     browser: 'chromium',
     browserChannel: null,
     browserExecutable: null,
+    extensionPath: null,
     artifacts: null,
     timeoutScale: 1,
     hostStageStartedAt: null,
@@ -71,6 +73,7 @@ function parseArgs(argv) {
     if (key === 'browser') options.browser = value;
     if (key === 'browser-channel') options.browserChannel = value.replace(/^"|"$/g, '');
     if (key === 'browser-executable') options.browserExecutable = value.replace(/^"|"$/g, '');
+    if (key === 'extension-path') options.extensionPath = value.replace(/^"|"$/g, '');
     if (key === 'artifacts') options.artifacts = value.replace(/^"|"$/g, '');
     if (key === 'timeout-scale') options.timeoutScale = parseFloat(value) || 1;
     if (key === 'host-stage-started-at') options.hostStageStartedAt = value.replace(/^"|"$/g, '');

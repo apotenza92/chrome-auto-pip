@@ -143,7 +143,7 @@ async function closeDefaultApp() {
 }
 
 async function killBrowserProcesses() {
-  const result = run('sh', ['-lc', 'pkill -f "Chromium|Google Chrome|chrome" >/dev/null 2>&1 || true']);
+  const result = run('sh', ['-lc', 'pkill -f "Chromium|Google Chrome|chrome|Helium" >/dev/null 2>&1 || true']);
   return { ok: result.status === 0, status: result.status };
 }
 

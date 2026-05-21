@@ -57,7 +57,7 @@ class ChromeSession {
   constructor(artifacts, options = {}) {
     this.artifacts = artifacts;
     this.options = options;
-    this.extensionPath = EXTENSION_PATH;
+    this.extensionPath = options.extensionPath || process.env.AUTO_PIP_EXTENSION_PATH || EXTENSION_PATH;
     this.context = null;
     this.worker = null;
     this.extensionId = null;
@@ -533,7 +533,27 @@ class ChromeSession {
 
   async openTab(url, focused = true) {
     const page = await this.context.newPage();
-    await page.goto(url);
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        const message = String(error && error.message ? error.message : error);
+        if (!message.includes('net::ERR_ABORTED')) throw error;
+        if (page.url() !== 'about:blank') {
+          lastError = null;
+          break;
+        }
+        if (attempt < 3) {
+          await sleep(1000);
+          continue;
+        }
+      }
+    }
+    if (lastError) throw lastError;
     if (focused) await page.bringToFront().catch(() => {});
     return page;
   }

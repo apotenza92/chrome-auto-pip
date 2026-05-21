@@ -80,7 +80,7 @@ Run this before uploading or publishing an update:
 npm run test:e2e:preupdate
 ```
 
-This runs the current supported extension surface on the three active Parallels VM targets, serially, and suspends each VM after its run.
+This runs the current supported extension surface on the three active Parallels VM targets serially. macOS guests are closed with stop/force-stop cleanup because suspend/restore is not available on every host macOS version.
 
 ### Individual full-extension E2E flow
 ```bash
@@ -88,6 +88,13 @@ node tmp/orchestrator/host.js --target=windows --flow=full-extension-e2e --suspe
 node tmp/orchestrator/host.js --target=macosTahoe --flow=full-extension-e2e --suspend-after-run
 node tmp/orchestrator/host.js --target=fedora --vm-name=Fedora --flow=full-extension-e2e --suspend-after-run
 ```
+
+### Helium disable regression
+```bash
+node tmp/orchestrator/host.js --target=macosTahoe --flow=helium-youtube-disable --suspend-after-run
+```
+
+The macOS runner treats `--suspend-after-run` as close-after-run: it first tries ACPI stop, then force-stop if needed.
 
 ### Active target policy
 - Primary macOS target: `macosTahoe`
@@ -136,6 +143,7 @@ node tmp/orchestrator/host.js --target=windows --flow=readiness --repeat=3
 - `manual-pip-probe`
 - `browser-autopip-probe`
 - `playwright-extension-e2e`
+- `helium-youtube-disable`
 
 ## Persistent tracking files
 - Active status targets are the current matrix:
@@ -153,8 +161,9 @@ node tmp/orchestrator/host.js --target=windows --flow=readiness --repeat=3
 - Runtime sync is now target-aware for Windows and POSIX guests.
 - Host-managed bootstrap probes can now test guest prerequisites, runtime layout, and Node dependency availability independently of the guest Node stage runner.
 - Host runs are now globally serialized with a shared lock so only one orchestrator VM run executes at a time.
-- Before each active-target run, the runner suspends the other active target VMs (`windows`, `fedora`, `macosTahoe`) so only one of them stays running.
-- Host runs can also use `--suspend-after-run` to suspend the current VM immediately after the flow finishes; the tmux runner now uses this by default.
+- Before each active-target run, the runner closes the other active target VMs (`windows`, `fedora`, `macosTahoe`) so only one of them stays running.
+- Host runs can also use `--suspend-after-run` to close the current VM immediately after the flow finishes; macOS targets use stop/force-stop rather than suspend.
+- VM readiness retries now restart a guest after repeated Parallels session errors, including error 255 from `prlctl exec`.
 - The tmux runner is now profile-driven, with a lean `focused` default and broader profiles only by explicit opt-in.
 - Windows now has a richer modular readiness flow and a dedicated `windows-switch-primitives` flow.
 - Capability probes now distinguish between:

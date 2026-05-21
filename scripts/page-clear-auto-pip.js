@@ -3,7 +3,22 @@
 (function pageClearAutoPiP() {
     'use strict';
 
+    try {
+        if (typeof window.__auto_pip_page_disable__ === 'function') {
+            return window.__auto_pip_page_disable__({
+                clearMediaSession: true,
+                disconnectObserver: true
+            });
+        }
+    } catch (_) { }
+
     window.__auto_pip_page_disabled__ = true;
+
+    try {
+        if (document.pictureInPictureElement && typeof document.exitPictureInPicture === 'function') {
+            document.exitPictureInPicture().catch(() => { });
+        }
+    } catch (_) { }
 
     try {
         if (navigator.mediaSession) {

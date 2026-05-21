@@ -349,6 +349,12 @@ function injectDisableAndExitAutoPiPScript(tabId, callback) {
   });
 }
 
+function injectClearAndExitAutoPiPScript(tabId, callback) {
+  injectClearAutoPiPScript(tabId, () => {
+    injectExitPiPScript(tabId, callback);
+  });
+}
+
 function registerTabForAutoPip(tabId, callback) {
   if (tabId == null || !autoPipOnTabSwitch) {
     if (callback) callback(null);
@@ -386,7 +392,7 @@ function clearAutoPipOnAllTabs() {
     if (!tabs) return;
     tabs.forEach(tab => {
       if (isRestrictedUrl(tab.url)) return;
-      injectDisableAndExitAutoPiPScript(tab.id, () => { });
+      injectClearAndExitAutoPiPScript(tab.id, () => { });
     });
   });
 }
@@ -783,6 +789,11 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
         } else if (pipActiveTab === senderTabId) {
           pipActiveTab = null;
         }
+        sendResponse({ ok: true });
+        return true;
+      }
+
+      if (message && message.type === 'auto_pip_heartbeat_check') {
         sendResponse({ ok: true });
         return true;
       }

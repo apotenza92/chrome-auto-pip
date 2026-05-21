@@ -13,7 +13,10 @@
         videoCachePrimed: false,
         lastDeepScanAt: 0,
         refreshDueAt: 0,
-        lastMutationVideoCheckAt: 0
+        lastMutationVideoCheckAt: 0,
+        heartbeatTimer: null,
+        lastHeartbeatAt: Date.now(),
+        heartbeatMessageListenerRegistered: false
     };
     window.__auto_pip_page_state__ = state;
     if (!(state.videos instanceof Set)) {
@@ -26,6 +29,8 @@
     const MUTATION_VIDEO_CHECK_THROTTLE_MS = 1000;
     const REFRESH_DELAY_MS = 100;
     const GENERIC_MUTATION_REFRESH_DELAY_MS = 1000;
+    const HEARTBEAT_CHECK_MS = 1000;
+    const HEARTBEAT_STALE_MS = 4000;
     let hiddenAttemptToken = 0;
 
     function isPlaying(video) {
@@ -124,6 +129,132 @@
                 }
             } catch (_) { }
         });
+    }
+
+    function removeManagedVideoAttributes() {
+        const disableVideo = (video) => {
+            if (!video) return;
+            try {
+                if (
+                    video.hasAttribute('data-auto-pip-managed') ||
+                    video.hasAttribute('autopictureinpicture')
+                ) {
+                    video.removeAttribute('autopictureinpicture');
+                    video.removeAttribute('data-auto-pip-managed');
+                }
+            } catch (_) { }
+        };
+
+        try {
+            document.querySelectorAll('video[data-auto-pip-managed], video[autopictureinpicture]')
+                .forEach(disableVideo);
+        } catch (_) { }
+
+        try {
+            document.querySelectorAll('*').forEach((element) => {
+                if (!element.shadowRoot || !element.shadowRoot.querySelectorAll) return;
+                try {
+                    element.shadowRoot
+                        .querySelectorAll('video[data-auto-pip-managed], video[autopictureinpicture]')
+                        .forEach(disableVideo);
+                } catch (_) { }
+            });
+        } catch (_) { }
+    }
+
+    function exitManagedPictureInPicture() {
+        const attempts = [0, 100, 300, 700, 1500];
+        attempts.forEach((delay) => {
+            setTimeout(() => {
+                let pipElement = null;
+                try {
+                    pipElement = document.pictureInPictureElement;
+                } catch (_) { }
+                if (!pipElement) return;
+
+                let extensionManaged = true;
+                try {
+                    extensionManaged = pipElement.hasAttribute('data-auto-pip-managed') ||
+                        pipElement.hasAttribute('autopictureinpicture') ||
+                        window.__auto_pip_page_disabled__ === true;
+                } catch (_) { }
+                if (!extensionManaged) return;
+
+                try {
+                    if (typeof document.exitPictureInPicture === 'function') {
+                        document.exitPictureInPicture().catch(() => { });
+                    }
+                } catch (_) { }
+            }, delay);
+        });
+    }
+
+    function disablePageAutoPiP(options = {}) {
+        window.__auto_pip_page_disabled__ = true;
+        hiddenAttemptToken += 1;
+
+        if (state.refreshTimer != null) {
+            try { clearTimeout(state.refreshTimer); } catch (_) { }
+            state.refreshTimer = null;
+            state.refreshDueAt = 0;
+        }
+
+        if (options.disconnectObserver === true && state.observer) {
+            try { state.observer.disconnect(); } catch (_) { }
+            state.observer = null;
+            state.registered = false;
+        }
+
+        exitManagedPictureInPicture();
+        removeManagedVideoAttributes();
+        exitManagedPictureInPicture();
+
+        if (options.clearMediaSession === true) {
+            try {
+                navigator.mediaSession.setActionHandler('enterpictureinpicture', null);
+            } catch (_) { }
+            try {
+                navigator.mediaSession.playbackState = 'none';
+            } catch (_) { }
+        }
+
+        return true;
+    }
+
+    window.__auto_pip_page_disable__ = disablePageAutoPiP;
+
+    function noteHeartbeat() {
+        state.lastHeartbeatAt = Date.now();
+    }
+
+    noteHeartbeat();
+
+    if (state.heartbeatMessageListenerRegistered !== true) {
+        window.addEventListener('message', (event) => {
+            const data = event && event.data;
+            if (!data || data.source !== 'chrome-auto-pip') return;
+            if (data.type === 'auto_pip_extension_heartbeat') {
+                noteHeartbeat();
+            }
+            if (data.type === 'auto_pip_extension_disabled') {
+                disablePageAutoPiP({
+                    clearMediaSession: true,
+                    disconnectObserver: true
+                });
+            }
+        }, false);
+        state.heartbeatMessageListenerRegistered = true;
+    }
+
+    if (state.heartbeatTimer == null) {
+        state.heartbeatTimer = setInterval(() => {
+            if (isDisabled()) return;
+            if ((Date.now() - (state.lastHeartbeatAt || 0)) <= HEARTBEAT_STALE_MS) return;
+            disablePageAutoPiP({
+                clearMediaSession: true,
+                disconnectObserver: true
+            });
+        }, HEARTBEAT_CHECK_MS);
     }
 
     function findVideos(options = {}) {

@@ -1,6 +1,8 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const CANDIDATE_EXECUTABLES = {
   chrome: [
@@ -14,6 +16,10 @@ const CANDIDATE_EXECUTABLES = {
   edge: [
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+  ],
+  helium: [
+    '/Applications/Helium.app/Contents/MacOS/Helium',
+    path.join(os.homedir(), 'Applications', 'Helium.app', 'Contents', 'MacOS', 'Helium')
   ]
 };
 
@@ -39,7 +45,7 @@ function resolveBrowserConfig(options = {}) {
       executablePath: explicitExecutablePath,
       channel: explicitChannel,
       workerTimeoutMs: browserWorkerTimeoutMs(key),
-      processName: key === 'edge' ? 'msedge' : 'chrome',
+      processName: key === 'edge' ? 'msedge' : key === 'helium' ? 'Helium' : 'chrome',
       source: 'explicit-executable',
       candidates: discoverExecutableCandidates(key)
     };
@@ -51,7 +57,7 @@ function resolveBrowserConfig(options = {}) {
       executablePath: null,
       channel: explicitChannel,
       workerTimeoutMs: browserWorkerTimeoutMs(key),
-      processName: key === 'edge' ? 'msedge' : 'chrome',
+      processName: key === 'edge' ? 'msedge' : key === 'helium' ? 'Helium' : 'chrome',
       source: 'explicit-channel',
       candidates: discoverExecutableCandidates(key)
     };
@@ -95,6 +101,24 @@ function resolveBrowserConfig(options = {}) {
       processName: 'msedge',
       source: discovered ? 'playwright-channel-with-discovered-edge' : 'playwright-channel',
       discoveredExecutablePath: discovered ? discovered.path : null,
+      candidates
+    };
+  }
+
+  if (key === 'helium') {
+    const candidates = discoverExecutableCandidates('helium');
+    const discovered = candidates.find((candidate) => candidate.exists);
+    if (!discovered) {
+      throw new Error(`Unsupported browser: helium executable not found. Checked: ${candidates.map(c => c.path).join(', ')}`);
+    }
+    return {
+      key,
+      executablePath: discovered.path,
+      channel: null,
+      workerTimeoutMs: browserWorkerTimeoutMs(key),
+      processName: 'Helium',
+      source: 'discovered-executable',
+      discoveredExecutablePath: discovered.path,
       candidates
     };
   }

@@ -95,6 +95,26 @@ test('disabling auto-pip from options applies to already-open video tabs', async
         await waitForTabComplete(videoTabId);
         await chrome.scripting.executeScript({
           target: { tabId: videoTabId },
+          world: 'MAIN',
+          func: () => {
+            window.__site_media_session_enter_pip_cleared__ = false;
+            if (!navigator.mediaSession || navigator.mediaSession.__autoPipTestPatched) return true;
+            const original = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
+            navigator.mediaSession.setActionHandler = (action, handler) => {
+              if (action === 'enterpictureinpicture' && handler === null) {
+                window.__site_media_session_enter_pip_cleared__ = true;
+              }
+              return original(action, handler);
+            };
+            navigator.mediaSession.__autoPipTestPatched = true;
+            navigator.mediaSession.setActionHandler('enterpictureinpicture', () => {
+              window.__site_media_session_enter_pip_called__ = true;
+            });
+            return true;
+          }
+        });
+        await chrome.scripting.executeScript({
+          target: { tabId: videoTabId },
           func: () => {
             const video = document.querySelector('video');
             if (!video) return false;
@@ -126,7 +146,8 @@ test('disabling auto-pip from options applies to already-open video tabs', async
         target: { tabId: id },
         world: 'MAIN',
         func: () => ({
-          pageDisabled: window.__auto_pip_page_disabled__ === true
+          pageDisabled: window.__auto_pip_page_disabled__ === true,
+          siteMediaSessionCleared: window.__site_media_session_enter_pip_cleared__ === true
         })
       });
 
@@ -136,7 +157,8 @@ test('disabling auto-pip from options applies to already-open video tabs', async
         autoPiPVideoCount: 0
       };
       const mainFlags = mainResult && mainResult[0] ? mainResult[0].result : {
-        pageDisabled: false
+        pageDisabled: false,
+        siteMediaSessionCleared: false
       };
 
       return { ...isolatedFlags, ...mainFlags };
@@ -154,6 +176,7 @@ test('disabling auto-pip from options applies to already-open video tabs', async
 
     await expect.poll(async () => (await getTabFlags(videoTabId)).disabled, { timeout: 15000 }).toBe(true);
     await expect.poll(async () => (await getTabFlags(videoTabId)).pageDisabled, { timeout: 15000 }).toBe(true);
+    await expect.poll(async () => (await getTabFlags(videoTabId)).siteMediaSessionCleared, { timeout: 15000 }).toBe(true);
     await expect.poll(async () => (await getTabFlags(videoTabId)).registered, { timeout: 15000 }).toBe(false);
     await expect.poll(async () => (await getTabFlags(videoTabId)).autoPiPVideoCount, { timeout: 15000 }).toBe(0);
 

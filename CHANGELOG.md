@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.7.5] - 2026-05-21
+
+### Fixed
+- Made disabling Auto PiP from extension options apply immediately to already-open video tabs, including YouTube tabs in Helium.
+- Made browser-level extension disable clean up already-injected pages by removing extension-managed Auto PiP state and exiting extension-triggered PiP.
+- Preserved disabled-site blocklist behaviour so site-owned MediaSession handlers are not cleared when a site is excluded.
+
+### Changed
+- Added a page-side watchdog so already-injected tabs can self-disable if the browser disables the extension and the service worker can no longer inject cleanup.
+- Hardened Parallels VM validation for macOS guests and added a Helium YouTube disable regression stage.
+
 ## [1.7.4] - 2026-05-14
 
 ### Fixed
