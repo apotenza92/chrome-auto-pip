@@ -1,5 +1,5 @@
 {
-  "name": "Automatic Picture-in-Picture (PiP)",
+  "name": "Automatic Picture-in-Picture (Auto PiP)",
   "description": "Auto Picture-in-Picture when you switch tabs like Arc and Firefox, with one-click PiP from the toolbar.",
   "version": "1.7.5",
   "manifest_version": 3,
