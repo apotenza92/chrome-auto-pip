@@ -126,104 +126,6 @@ function setTargetTab(tabId) {
   targetTab = tabId == null ? null : tabId;
 }
 
-function getAutoPiPContentSettingApi() {
-  return chrome && chrome.contentSettings && chrome.contentSettings.autoPictureInPicture
-    ? chrome.contentSettings.autoPictureInPicture
-    : null;
-}
-
-function getPrimaryPatternForUrl(url) {
-  if (!url || isRestrictedUrl(url)) return null;
-  try {
-    const parsed = new URL(url);
-    return `${parsed.protocol}//${parsed.host}/*`;
-  } catch (_) {
-    return null;
-  }
-}
-
-function ensureAutoPiPAllowedForTab(tabId, callback) {
-  const done = typeof callback === 'function' ? callback : () => { };
-  const api = getAutoPiPContentSettingApi();
-  if (!api) {
-    done({ ok: false, reason: 'contentSettingsUnavailable' });
-    return;
-  }
-
-  chrome.tabs.get(tabId, (tab) => {
-    if (chrome.runtime.lastError || !tab || !tab.url) {
-      done({ ok: false, reason: 'tabUnavailable' });
-      return;
-    }
-
-    const primaryPattern = getPrimaryPatternForUrl(tab.url);
-    if (!primaryPattern) {
-      done({ ok: false, reason: 'invalidPattern', url: tab.url });
-      return;
-    }
-
-    api.set({ primaryPattern, setting: 'allow', scope: 'regular' }, () => {
-      const error = chrome.runtime.lastError;
-      if (error) {
-        done({ ok: false, reason: error.message, primaryPattern });
-        return;
-      }
-      done({ ok: true, primaryPattern });
-    });
-  });
-}
-
-function setAutoPiPContentSettingForUrl(url, setting, callback) {
-  const done = typeof callback === 'function' ? callback : () => { };
-  const api = getAutoPiPContentSettingApi();
-  if (!api) {
-    done({ ok: false, reason: 'contentSettingsUnavailable' });
-    return;
-  }
-
-  const primaryPattern = getPrimaryPatternForUrl(url);
-  if (!primaryPattern) {
-    done({ ok: false, reason: 'invalidPattern', url });
-    return;
-  }
-
-  api.set({ primaryPattern, setting, scope: 'regular' }, () => {
-    const error = chrome.runtime.lastError;
-    if (error) {
-      done({ ok: false, reason: error.message, primaryPattern, setting });
-      return;
-    }
-    done({ ok: true, primaryPattern, setting });
-  });
-}
-
-function blockAutoPiPForTab(tab, callback) {
-  const done = typeof callback === 'function' ? callback : () => { };
-  if (!tab || !tab.url || isRestrictedUrl(tab.url)) {
-    done({ ok: false, reason: 'invalidTab' });
-    return;
-  }
-  setAutoPiPContentSettingForUrl(tab.url, 'block', done);
-}
-
-function clearAutoPiPContentSettings(callback) {
-  const done = typeof callback === 'function' ? callback : () => { };
-  const api = getAutoPiPContentSettingApi();
-  if (!api) {
-    done({ ok: false, reason: 'contentSettingsUnavailable' });
-    return;
-  }
-
-  api.clear({ scope: 'regular' }, () => {
-    const error = chrome.runtime.lastError;
-    if (error) {
-      done({ ok: false, reason: error.message });
-      return;
-    }
-    done({ ok: true });
-  });
-}
-
 function safeExecuteScript(tabId, files, callback, options = null) {
   const allowBlocked = options && options.allowBlocked === true;
   chrome.tabs.get(tabId, (tab) => {
@@ -306,11 +208,9 @@ function injectPageDisableAutoPiPScript(tabId, callback) {
 }
 
 function injectTriggerAutoPiP(tabId, callback) {
-  ensureAutoPiPAllowedForTab(tabId, () => {
-    injectWithUtils(tabId, ['./scripts/trigger-auto-pip.js'], (results) => {
-      injectPageAutoPiPScript(tabId, () => {
-        if (callback) callback(results);
-      });
+  injectWithUtils(tabId, ['./scripts/trigger-auto-pip.js'], (results) => {
+    injectPageAutoPiPScript(tabId, () => {
+      if (callback) callback(results);
     });
   });
 }
@@ -376,18 +276,6 @@ function registerAutoPipOnAllTabs() {
 }
 
 function clearAutoPipOnAllTabs() {
-  clearAutoPiPContentSettings(() => {
-    chrome.tabs.query({}, (tabs) => {
-      if (!tabs) return;
-      tabs.forEach(tab => {
-        if (isRestrictedUrl(tab.url)) return;
-        if (!isAutoPipAllowedTab(tab)) {
-          blockAutoPiPForTab(tab, () => { });
-        }
-      });
-    });
-  });
-
   chrome.tabs.query({}, (tabs) => {
     if (!tabs) return;
     tabs.forEach(tab => {
@@ -441,9 +329,7 @@ function applyBlocklistToAllTabs() {
       if (!isValidTab(tab)) return;
       const allowed = isAutoPipAllowedTab(tab);
       if (!allowed) {
-        blockAutoPiPForTab(tab, () => {
-          injectDisableAutoPiPScript(tab.id, () => { });
-        });
+        injectDisableAutoPiPScript(tab.id, () => { });
         if (targetTab === tab.id) setTargetTab(null);
         if (pipActiveTab === tab.id) pipActiveTab = null;
         return;
@@ -713,9 +599,7 @@ if (typeof chrome !== 'undefined' && chrome.tabs) {
     if (!tab || !tab.url || isRestrictedUrl(tab.url)) return;
 
     if (!isAutoPipAllowedTab(tab)) {
-      blockAutoPiPForTab(tab, () => {
-        injectDisableAutoPiPScript(tabId, () => { });
-      });
+      injectDisableAutoPiPScript(tabId, () => { });
       return;
     }
 

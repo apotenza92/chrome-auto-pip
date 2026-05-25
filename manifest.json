@@ -1,7 +1,7 @@
 {
   "name": "Automatic Picture-in-Picture (Auto PiP)",
   "description": "Auto Picture-in-Picture when you switch tabs like Arc and Firefox, with one-click PiP from the toolbar.",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "manifest_version": 3,
   "icons": {
     "128": "assets/icon.png"
@@ -33,8 +33,7 @@
     "scripting",
     "storage",
     "tabs",
-    "activeTab",
-    "contentSettings"
+    "activeTab"
   ],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [

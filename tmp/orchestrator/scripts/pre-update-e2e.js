@@ -21,9 +21,9 @@ const targets = [
     args: ['--target=fedora', `--vm-name=${process.env.AUTO_PIP_FEDORA_VM_NAME || 'Fedora'}`]
   },
   {
-    key: 'macosTahoe',
-    label: 'macOS Tahoe',
-    args: ['--target=macosTahoe']
+    key: 'macos',
+    label: 'macOS',
+    args: ['--target=macos']
   }
 ];
 

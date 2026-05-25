@@ -25,7 +25,19 @@
 
     if (videos.length === 0) return false;
 
-    const video = (isPlaying && videos.find(isPlaying)) || videos[0];
+    const wasRecentlyPlaying = (video) => {
+        const lastPlayingAt = Number(video.getAttribute('data-auto-pip-last-playing-at') || 0);
+        const userPausedAt = Number(video.getAttribute('data-auto-pip-user-paused-at') || 0);
+        if (userPausedAt && (!lastPlayingAt || userPausedAt >= lastPlayingAt)) return false;
+        if (lastPlayingAt && (Date.now() - lastPlayingAt) <= 10000) return true;
+        return video.currentTime > 0 && video.readyState >= 2 && !video.ended;
+    };
+
+    const video = isPlaying
+        ? videos.find(isPlaying)
+        : videos.find(v => (!v.paused && !v.ended && v.readyState >= 2) || wasRecentlyPlaying(v));
+    if (!video) return false;
+
     try {
         if (requestPiP) {
             await requestPiP(video);

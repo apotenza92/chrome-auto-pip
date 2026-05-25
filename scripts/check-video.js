@@ -1,4 +1,4 @@
-// Check if page has a playing or eligible video
+// Check if page has a playing video
 
 (function hasPlayingVideo() {
     'use strict';
@@ -27,12 +27,8 @@
 
         if (candidates.length === 0) return false;
 
-        // If any are actively playing, that's a strong signal
         const checkPlaying = isPlaying || (v => v.currentTime > 0 && !v.paused && !v.ended);
-        if (candidates.some(checkPlaying)) return true;
-
-        // Lenient: accept presence of a visible, eligible video with metadata
-        return true;
+        return candidates.some(checkPlaying);
     } catch (_) {
         return false;
     }

@@ -239,6 +239,27 @@
         return found;
     }
 
+    function syncAutoPiPAttribute(video) {
+        if (!video) return;
+        const now = Date.now();
+        const playing = isPlaying ? isPlaying(video) : (!video.paused && !video.ended && video.readyState >= 2);
+        if (playing) {
+            try { video.setAttribute('data-auto-pip-last-playing-at', String(now)); } catch (_) { }
+            if (!video.hasAttribute('autopictureinpicture')) {
+                video.setAttribute('autopictureinpicture', '');
+                log('Added autopictureinpicture attribute to playing video');
+            }
+            video.setAttribute('data-auto-pip-managed', '');
+            return;
+        }
+
+        if (video.hasAttribute('data-auto-pip-managed')) {
+            video.removeAttribute('autopictureinpicture');
+            video.removeAttribute('data-auto-pip-managed');
+            log('Removed autopictureinpicture attribute from non-playing video');
+        }
+    }
+
     // Find best video for PiP (deep search once, then cache observed videos)
     function getEligibleVideos(options = {}) {
         primeObservedVideos(options.forceScan === true);
@@ -256,13 +277,7 @@
         // This tells Chrome to auto-PiP when the tab becomes hidden
         // Only add if auto-PiP is not disabled
         if (!isDisabled()) {
-            videos.forEach(v => {
-                if (!v.hasAttribute('autopictureinpicture')) {
-                    v.setAttribute('autopictureinpicture', '');
-                    v.setAttribute('data-auto-pip-managed', '');
-                    log('Added autopictureinpicture attribute to video');
-                }
-            });
+            videos.forEach(syncAutoPiPAttribute);
         }
         
         return videos;
@@ -305,7 +320,13 @@
                 return;
             }
 
-            const video = (isPlaying && candidates.find(isPlaying)) || candidates[0];
+            const video = isPlaying
+                ? candidates.find(isPlaying)
+                : candidates.find(v => !v.paused && !v.ended && v.readyState >= 2);
+            if (!video) {
+                log('No playing candidate, aborting');
+                return;
+            }
             try {
                 log('Requesting PiP for video', { paused: video.paused, src: video.src?.substring(0, 50) });
                 if (requestPiP) {
@@ -421,6 +442,9 @@
                 if (e.target?.tagName === 'VIDEO') {
                     observedVideos.add(e.target);
                     log('Video event:', eventType);
+                    if (eventType === 'pause' && document.visibilityState === 'visible') {
+                        try { e.target.setAttribute('data-auto-pip-user-paused-at', String(Date.now())); } catch (_) { }
+                    }
                     
                     // Check if auto-PiP has been disabled
                     if (isDisabled()) {
@@ -428,11 +452,7 @@
                         return;
                     }
                     
-                    // Ensure autopictureinpicture attribute is set
-                    if (!e.target.hasAttribute('autopictureinpicture')) {
-                        e.target.setAttribute('autopictureinpicture', '');
-                        log('Added autopictureinpicture on', eventType);
-                    }
+                    syncAutoPiPAttribute(e.target);
                     attachPiPStateBridge(e.target);
                     updatePlaybackState({ forceScan: true });
                 }
@@ -526,11 +546,11 @@
                 const candidates = getEligibleVideos();
                 if (candidates.length === 0) return;
                 
-                // Ensure autopictureinpicture is set - browser should handle auto-PiP
-                const video = candidates[0];
-                if (!video.hasAttribute('autopictureinpicture')) {
-                    video.setAttribute('autopictureinpicture', '');
-                }
+                const video = isPlaying
+                    ? candidates.find(isPlaying)
+                    : candidates.find(v => !v.paused && !v.ended && v.readyState >= 2);
+                if (!video) return;
+                syncAutoPiPAttribute(video);
                 
                 // Only try manual fallback if we have a recent user gesture (within 5 seconds)
                 const timeSinceGesture = Date.now() - lastUserGestureTime;

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [1.7.6] - 2026-05-25
+
+### Fixed
+- Restored Auto PiP's playing-video gate so paused videos do not enter PiP during tab-switch activation.
+- Made all automatic PiP paths require active playback, including the tab-leave ensure-PiP helper and page-world MediaSession handler.
+- Stopped mutating Chrome's Auto PiP content setting; the extension now only manages its own registration, blocklist, and video attributes.
+
+### Tests
+- Added a paused-video tab-switch regression test to the Parallels VM E2E gate.
+- Updated the active Parallels VM matrix to Windows, Fedora, and the new macOS VM target.
+- Added coverage that the blocklist disables extension-managed Auto PiP without requesting `contentSettings`.
+
 ## [1.7.5] - 2026-05-21
 
 ### Fixed

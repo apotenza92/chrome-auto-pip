@@ -265,22 +265,33 @@
             .sort((a, b) => Number(isPlaying(b)) - Number(isPlaying(a)));
     }
 
+    function syncAutoPiPAttribute(video) {
+        if (!video) return;
+        try {
+            if (isPlaying(video)) {
+                video.setAttribute('data-auto-pip-last-playing-at', String(Date.now()));
+                video.setAttribute('autopictureinpicture', '');
+                video.setAttribute('data-auto-pip-managed', '');
+                return;
+            }
+            if (video.hasAttribute('data-auto-pip-managed')) {
+                video.removeAttribute('autopictureinpicture');
+                video.removeAttribute('data-auto-pip-managed');
+            }
+        } catch (_) { }
+    }
+
     function updateVideos(options = {}) {
         if (isDisabled()) return [];
         const videos = findVideos(options);
-        videos.forEach((video) => {
-            try {
-                video.setAttribute('autopictureinpicture', '');
-                video.setAttribute('data-auto-pip-managed', '');
-            } catch (_) { }
-        });
+        videos.forEach(syncAutoPiPAttribute);
         return videos;
     }
 
     async function enterPictureInPicture(options = {}) {
         if (isDisabled() || document.pictureInPictureElement) return false;
         const videos = updateVideos(options);
-        const video = videos.find(isPlaying) || videos[0];
+        const video = videos.find(isPlaying);
         if (!video || typeof video.requestPictureInPicture !== 'function') {
             return false;
         }
@@ -340,6 +351,12 @@
             document.addEventListener(eventName, (event) => {
                 if (event.target instanceof HTMLVideoElement) {
                     rememberVideo(event.target);
+                    if (eventName === 'pause' && document.visibilityState === 'visible') {
+                        try { event.target.setAttribute('data-auto-pip-user-paused-at', String(Date.now())); } catch (_) { }
+                    }
+                    if (eventName === 'pause') {
+                        syncAutoPiPAttribute(event.target);
+                    }
                     scheduleRefresh();
                 }
             }, true);

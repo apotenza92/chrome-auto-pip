@@ -41,7 +41,7 @@ const STAGE_TIMEOUT_MULTIPLIER = {
   'helium-youtube-disable': 8
 };
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
-const ACTIVE_TARGET_KEYS = ['windows', 'fedora', 'macosTahoe'];
+const ACTIVE_TARGET_KEYS = ['windows', 'fedora', 'macos'];
 const VM_RUN_LOCK_PATH = path.join(repoRoot, 'tmp', 'orchestrator', 'vm-run.lock');
 const VM_RUN_LOCK_POLL_MS = 5000;
 

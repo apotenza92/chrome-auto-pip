@@ -36,7 +36,7 @@ cd '$REPO_ROOT' && while true; do \
   '$NODE_BIN' tmp/orchestrator/host.js --target=fedora --vm-name="\${AUTO_PIP_FEDORA_VM_NAME:-Fedora}" --flow=full-extension-e2e --continue-on-failure --suspend-after-run; \
   '$NODE_BIN' tmp/orchestrator/scripts/refresh-status.js; \
   sleep 60; \
-  '$NODE_BIN' tmp/orchestrator/host.js --target=macosTahoe --flow=full-extension-e2e --continue-on-failure --suspend-after-run; \
+  '$NODE_BIN' tmp/orchestrator/host.js --target=macos --flow=full-extension-e2e --continue-on-failure --suspend-after-run; \
   '$NODE_BIN' tmp/orchestrator/scripts/refresh-status.js; \
   sleep 900; \
 done
@@ -63,7 +63,7 @@ EOF
     macos)
       cat <<EOF
 cd '$REPO_ROOT' && while true; do \
-  '$NODE_BIN' tmp/orchestrator/host.js --target=macosTahoe --flow=full-extension-e2e --continue-on-failure --suspend-after-run; \
+  '$NODE_BIN' tmp/orchestrator/host.js --target=macos --flow=full-extension-e2e --continue-on-failure --suspend-after-run; \
   '$NODE_BIN' tmp/orchestrator/scripts/refresh-status.js; \
   sleep 900; \
 done

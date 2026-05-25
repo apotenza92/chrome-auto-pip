@@ -69,7 +69,7 @@ node tmp/orchestrator/host.js --target=windows --flow=readiness
 ### Core primitive flow
 ```bash
 node tmp/orchestrator/host.js --target=windows --flow=core-primitives
-node tmp/orchestrator/host.js --target=macosTahoe --flow=core-primitives
+node tmp/orchestrator/host.js --target=macos --flow=core-primitives
 node tmp/orchestrator/host.js --target=fedora --flow=bootstrap
 ```
 
@@ -85,21 +85,21 @@ This runs the current supported extension surface on the three active Parallels 
 ### Individual full-extension E2E flow
 ```bash
 node tmp/orchestrator/host.js --target=windows --flow=full-extension-e2e --suspend-after-run
-node tmp/orchestrator/host.js --target=macosTahoe --flow=full-extension-e2e --suspend-after-run
-node tmp/orchestrator/host.js --target=fedora --vm-name=Fedora --flow=full-extension-e2e --suspend-after-run
+node tmp/orchestrator/host.js --target=macos --flow=full-extension-e2e --suspend-after-run
+node tmp/orchestrator/host.js --target=fedora --flow=full-extension-e2e --suspend-after-run
 ```
 
 ### Helium disable regression
 ```bash
-node tmp/orchestrator/host.js --target=macosTahoe --flow=helium-youtube-disable --suspend-after-run
+node tmp/orchestrator/host.js --target=macos --flow=helium-youtube-disable --suspend-after-run
 ```
 
 The macOS runner treats `--suspend-after-run` as close-after-run: it first tries ACPI stop, then force-stop if needed.
 
 ### Active target policy
-- Primary macOS target: `macosTahoe`
+- Primary macOS target: `macos`
 - Primary Linux target: `fedora`
-- `ubuntu` and `macosSequoia` remain available in code, but are not part of the active validation matrix.
+- `ubuntu`, `macosSequoia`, and `macosTahoe` remain available in code, but are not part of the active validation matrix.
 
 ### Repeat a flow 3 times
 ```bash
@@ -149,7 +149,7 @@ node tmp/orchestrator/host.js --target=windows --flow=readiness --repeat=3
 - Active status targets are the current matrix:
   - `windows`
   - `fedora`
-  - `macosTahoe`
+  - `macos`
 - `tmp/orchestrator/STATUS.md` - compact generated summary
 - `tmp/orchestrator/NOW.md` - current active focus / handoff state
 - `tmp/orchestrator/WORKLOG.md` - narrative progress log
@@ -161,7 +161,7 @@ node tmp/orchestrator/host.js --target=windows --flow=readiness --repeat=3
 - Runtime sync is now target-aware for Windows and POSIX guests.
 - Host-managed bootstrap probes can now test guest prerequisites, runtime layout, and Node dependency availability independently of the guest Node stage runner.
 - Host runs are now globally serialized with a shared lock so only one orchestrator VM run executes at a time.
-- Before each active-target run, the runner closes the other active target VMs (`windows`, `fedora`, `macosTahoe`) so only one of them stays running.
+- Before each active-target run, the runner closes the other active target VMs (`windows`, `fedora`, `macos`) so only one of them stays running.
 - Host runs can also use `--suspend-after-run` to close the current VM immediately after the flow finishes; macOS targets use stop/force-stop rather than suspend.
 - VM readiness retries now restart a guest after repeated Parallels session errors, including error 255 from `prlctl exec`.
 - The tmux runner is now profile-driven, with a lean `focused` default and broader profiles only by explicit opt-in.
@@ -170,5 +170,5 @@ node tmp/orchestrator/host.js --target=windows --flow=readiness --repeat=3
   - probe execution success
   - measured capability/result
   - environment-unavailable skips
-- macOS Tahoe core primitives are in good shape.
+- macOS core primitives are in good shape.
 - Fedora bootstrap/headless browser validation works, but headed desktop automation is still blocked by display prerequisites.

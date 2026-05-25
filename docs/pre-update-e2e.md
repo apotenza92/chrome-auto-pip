@@ -10,7 +10,7 @@ The gate runs the supported extension surface in Parallels VMs only:
 
 - Windows 11 ARM
 - Fedora
-- macOS Tahoe
+- macOS
 
 Each target runs:
 

@@ -93,31 +93,10 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
     }, tabId);
   };
 
-  const getAutoPiPContentSetting = async () => {
-    return worker.evaluate(async (url) => {
-      if (!chrome.contentSettings.autoPictureInPicture) return null;
-      const primaryUrl = new URL(url).origin + '/';
-      return await chrome.contentSettings.autoPictureInPicture.get({ primaryUrl });
-    }, baseURL);
-  };
-
   try {
     const { videoTabId } = await createVideoTab();
 
-    const hasAutoPiPContentSetting = await worker.evaluate(() => !!chrome.contentSettings.autoPictureInPicture);
-
-    if (hasAutoPiPContentSetting) {
-      await worker.evaluate(async (url) => {
-        const primaryPattern = new URL(url).origin + '/*';
-        await chrome.contentSettings.autoPictureInPicture.set({
-          primaryPattern,
-          setting: 'allow',
-          scope: 'regular'
-        });
-      }, baseURL);
-
-      await expect.poll(async () => (await getAutoPiPContentSetting()).setting, { timeout: 15000 }).toBe('allow');
-    }
+    await expect(worker.evaluate(() => !!chrome.contentSettings)).resolves.toBe(false);
 
     await worker.evaluate((payload) => new Promise(resolve => {
       chrome.storage.sync.set(payload, () => {
@@ -129,9 +108,6 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
     await expect.poll(async () => (await getTabFlags(videoTabId)).registered, { timeout: 15000 }).toBe(false);
     await expect.poll(async () => (await getTabFlags(videoTabId)).pageDisabled, { timeout: 15000 }).toBe(true);
     expect((await getTabFlags(videoTabId)).siteMediaSessionCleared).toBe(false);
-    if (hasAutoPiPContentSetting) {
-      await expect.poll(async () => (await getAutoPiPContentSetting()).setting, { timeout: 15000 }).toBe('block');
-    }
 
     await worker.evaluate((id) => {
       if (id) chrome.tabs.remove(id);

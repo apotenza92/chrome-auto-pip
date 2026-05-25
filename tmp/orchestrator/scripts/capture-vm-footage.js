@@ -40,13 +40,13 @@ const requestedTargets = (process.env.AUTO_PIP_FOOTAGE_TARGETS || '')
 const targets = [
   { key: 'windows', label: 'Windows 11 ARM' },
   { key: 'fedora', label: 'Fedora' },
-  { key: 'macosTahoe', label: 'macOS Tahoe' }
+  { key: 'macos', label: 'macOS' }
 ]
   .filter((target) => requestedTargets.length === 0 || requestedTargets.includes(target.key))
   .map((target) => ({ ...target, vmName: resolveVmName(target.key) }));
 
 if (requestedTargets.length > 0 && targets.length !== requestedTargets.length) {
-  const knownTargets = ['windows', 'fedora', 'macosTahoe'].join(', ');
+  const knownTargets = ['windows', 'fedora', 'macos'].join(', ');
   throw new Error(`Unknown footage target in AUTO_PIP_FOOTAGE_TARGETS. Known targets: ${knownTargets}`);
 }
 

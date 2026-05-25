@@ -37,6 +37,39 @@ function summarizeStats(stats, specCount) {
   return `Playwright extension E2E failed (${unexpected} unexpected, ${expected} expected, ${flaky} flaky, ${skipped} skipped)`;
 }
 
+function collectFailures(report) {
+  const failures = [];
+
+  function visitSuites(suites, prefix = []) {
+    if (!Array.isArray(suites)) return;
+    suites.forEach((suite) => {
+      const nextPrefix = suite && suite.title ? prefix.concat(suite.title) : prefix;
+      visitSuites(suite && suite.suites, nextPrefix);
+      const specs = suite && Array.isArray(suite.specs) ? suite.specs : [];
+      specs.forEach((spec) => {
+        const tests = Array.isArray(spec.tests) ? spec.tests : [];
+        tests.forEach((test) => {
+          const results = Array.isArray(test.results) ? test.results : [];
+          results.forEach((result) => {
+            if (!result || result.status === 'passed' || result.status === 'skipped') return;
+            failures.push({
+              title: nextPrefix.concat(spec.title || test.title || 'unknown test').filter(Boolean).join(' > '),
+              status: result.status,
+              duration: result.duration,
+              errors: Array.isArray(result.errors)
+                ? result.errors.map((error) => error && (error.message || error.stack || String(error))).filter(Boolean)
+                : []
+            });
+          });
+        });
+      });
+    });
+  }
+
+  visitSuites(report && report.suites);
+  return failures;
+}
+
 async function run(artifacts, options = {}) {
   const reset = await resetStageEnvironment({ killBrowser: true, sleepMs: 1500 });
   const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
@@ -67,6 +100,7 @@ async function run(artifacts, options = {}) {
   const stderr = result.stderr || '';
   const { report, parseError } = parseJsonReport(stdout);
   const stats = report && report.stats ? report.stats : null;
+  const failures = report ? collectFailures(report) : [];
 
   artifacts.writeJson('playwright-extension-e2e-run.json', {
     command: process.execPath,
@@ -95,6 +129,7 @@ async function run(artifacts, options = {}) {
       exitCode: result.status,
       signal: result.signal || null,
       stats,
+      failures,
       parseError,
       reportParsed: !!report
     }

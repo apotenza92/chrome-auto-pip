@@ -32,7 +32,7 @@ const REGISTRY = {
   },
   fedora: {
     key: 'fedora',
-    vmName: 'Fedora 42 ARM64',
+    vmName: 'Fedora',
     guestFamily: 'linux',
     shell: 'bash',
     browser: 'chromium',
@@ -63,6 +63,24 @@ const REGISTRY = {
     readyCommand: ['sw_vers'],
     nativeAppProfile: 'macos-textedit',
     notes: 'May require guest Accessibility/Automation permissions for full window/app automation.'
+  },
+  macos: {
+    key: 'macos',
+    vmName: 'macOS',
+    hostWindowAliases: ['Control Center'],
+    guestFamily: 'macos',
+    shell: 'zsh',
+    browser: 'chromium',
+    runtimeRoot: '/Users/alex/chrome-auto-pip',
+    sharedHomeRoot: '/Volumes/psf/Home',
+    nodeRoot: '/Users/alex/.pi-tools/node',
+    nodeCommand: '/Users/alex/.pi-tools/node/bin/node',
+    npmCommand: '/Users/alex/.pi-tools/node/bin/npm',
+    npmCliPath: '/Users/alex/.pi-tools/node/lib/node_modules/npm/bin/npm-cli.js',
+    nodeBootstrapUrl: 'https://nodejs.org/dist/v20.20.0/node-v20.20.0-darwin-arm64.tar.gz',
+    readyCommand: ['sw_vers'],
+    nativeAppProfile: 'macos-textedit',
+    notes: 'Primary macOS validation VM. May require guest Accessibility/Automation permissions for full window/app automation.'
   },
   macosTahoe: {
     key: 'macosTahoe',
