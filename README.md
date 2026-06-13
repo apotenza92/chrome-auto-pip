@@ -109,11 +109,10 @@ Real website smoke tests are opt-in:
 
 ```bash
 AUTO_PIP_REAL_SITES=1 npm run test:local:sites
-npm run test:local:helium
 ```
 
 Useful environment variables:
-- `AUTO_PIP_LOCAL_BROWSER=chromium|helium`
+- `AUTO_PIP_LOCAL_BROWSER=chromium`
 - `AUTO_PIP_LOCAL_EXECUTABLE=/path/to/browser`
 - `AUTO_PIP_REAL_SITES=1`
 - `AUTO_PIP_KEEP_PROFILE=1`

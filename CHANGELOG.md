@@ -13,9 +13,9 @@
 
 ### Fixed
 - Added ownership tracking so disabling Auto PiP removes only `autopictureinpicture` attributes added by this extension.
-- Added explicit diagnostics and toolbar badge guidance for browsers such as Helium that register native Auto-PiP state but do not fire the native callback.
+- Added explicit diagnostics and toolbar badge guidance for Chromium browsers that register native Auto-PiP state but do not fire the native callback.
 - Added opt-in local debug logging, an options switch, and a direct `.txt` log download.
-- Added a narrow one-shot tab-leave compatibility request for currently playing videos so repeated Helium tab switches work without restoring the old fallback stack.
+- Added a narrow one-shot tab-leave compatibility request for currently playing videos so repeated tab switches work without restoring the old fallback stack.
 - Re-armed extension-owned Auto-PiP after PiP leaves so repeated tab-switch cycles can trigger again.
 - Preserved site-owned `autopictureinpicture` and MediaSession behavior when disabling Auto PiP or blocklisting a site.
 
@@ -39,13 +39,13 @@
 ## [1.7.5] - 2026-05-21
 
 ### Fixed
-- Made disabling Auto PiP from extension options apply immediately to already-open video tabs, including YouTube tabs in Helium.
+- Made disabling Auto PiP from extension options apply immediately to already-open video tabs, including YouTube tabs in Chromium browsers.
 - Made browser-level extension disable clean up already-injected pages by removing extension-managed Auto PiP state and exiting extension-triggered PiP.
 - Preserved disabled-site blocklist behaviour so site-owned MediaSession handlers are not cleared when a site is excluded.
 
 ### Changed
 - Added a page-side watchdog so already-injected tabs can self-disable if the browser disables the extension and the service worker can no longer inject cleanup.
-- Hardened Parallels VM validation for macOS guests and added a Helium YouTube disable regression stage.
+- Hardened Parallels VM validation for macOS guests and added a targeted YouTube disable regression stage.
 
 ## [1.7.4] - 2026-05-14
 
