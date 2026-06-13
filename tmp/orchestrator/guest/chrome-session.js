@@ -332,34 +332,18 @@ class ChromeSession {
   async setModes(modes) {
     this.requireExtension();
     const settings = {
-      autoPipOnTabSwitch: !!modes.tab,
-      autoPipOnWindowSwitch: !!modes.window,
-      autoPipOnAppSwitch: !!modes.app
+      autoPipOnTabSwitch: !!modes.tab
     };
     return this.worker.evaluate(async (nextSettings) => {
       if (typeof settingsReady !== 'undefined' && settingsReady && typeof settingsReady.then === 'function') {
         try { await settingsReady; } catch (_) {}
       }
-      let platformOs = null;
-      try {
-        const info = await new Promise((resolve) => chrome.runtime.getPlatformInfo(resolve));
-        platformOs = info && info.os ? info.os : null;
-      } catch (_) {}
-      if (platformOs === 'linux') {
-        nextSettings.autoPipOnAppSwitch = false;
-      }
       autoPipOnTabSwitch = nextSettings.autoPipOnTabSwitch;
-      autoPipOnWindowSwitch = nextSettings.autoPipOnWindowSwitch;
-      autoPipOnAppSwitch = nextSettings.autoPipOnAppSwitch;
       await chrome.storage.sync.set(nextSettings);
       await chrome.storage.local.set(nextSettings);
       return {
         ok: true,
-        platformOs,
-        appSwitchSupported: platformOs !== 'linux',
-        autoPipOnTabSwitch,
-        autoPipOnWindowSwitch,
-        autoPipOnAppSwitch
+        autoPipOnTabSwitch
       };
     }, settings);
   }
@@ -372,8 +356,8 @@ class ChromeSession {
         const candidateTabs = tabList.filter((tab) => isValidTab(tab) && isAutoPipAllowedTab(tab));
 
         candidateTabs.sort((a, b) => {
-          const aScore = (a.active ? 2 : 0) + (a.windowId === lastFocusedNormalWindowId ? 1 : 0);
-          const bScore = (b.active ? 2 : 0) + (b.windowId === lastFocusedNormalWindowId ? 1 : 0);
+          const aScore = a.active ? 1 : 0;
+          const bScore = b.active ? 1 : 0;
           return bScore - aScore;
         });
 
@@ -396,7 +380,7 @@ class ChromeSession {
             }
             setTargetTab(tab.id);
             injectTriggerAutoPiP(tab.id, () => {
-              resolve({ ok: true, tabId: tab.id, targetTab, targetWindowId });
+              resolve({ ok: true, tabId: tab.id, targetTab });
             });
           });
         };
@@ -407,16 +391,11 @@ class ChromeSession {
   }
 
   async clearDebugLog() {
-    this.requireExtension();
-    return this.worker.evaluate(() => {
-      log = [];
-      return { ok: true };
-    });
+    return { ok: true, skipped: true, reason: 'debug log removed in v2' };
   }
 
   async getDebugLog() {
-    this.requireExtension();
-    return this.worker.evaluate(() => Array.isArray(log) ? log.slice() : []);
+    return [];
   }
 
   async getBackgroundState() {
@@ -429,14 +408,8 @@ class ChromeSession {
         currentTab,
         prevTab,
         targetTab,
-        targetWindowId,
-        lastFocusedWindowId,
-        lastFocusedNormalWindowId,
         pipActiveTab,
-        autoPipOnTabSwitch,
-        autoPipOnWindowSwitch,
-        autoPipOnAppSwitch,
-        logLength: Array.isArray(log) ? log.length : null
+        autoPipOnTabSwitch
       };
     });
   }

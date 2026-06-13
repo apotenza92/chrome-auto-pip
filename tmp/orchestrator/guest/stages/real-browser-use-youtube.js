@@ -120,7 +120,6 @@ async function ensureYouTubePlaying(page, timeoutMs) {
     if (!video) return false;
     video.muted = true;
     try { video.volume = 0; } catch (_) {}
-    try { video.setAttribute('autopictureinpicture', ''); } catch (_) {}
     const playPromise = video.play();
     if (playPromise && typeof playPromise.catch === 'function') {
       await playPromise.catch(() => {});

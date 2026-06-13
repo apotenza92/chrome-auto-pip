@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-06-12
+
+### Changed
+- Reworked the extension into small buildless modules: background state/injection/settings/message helpers, shared content video/PiP helpers, thin command scripts, and one page-world Auto-PiP agent.
+- Simplified automatic PiP around browser-native Auto-PiP registration using managed `autopictureinpicture` attributes and MediaSession playback state.
+- Stopped sweeping every open tab on install/startup; tabs are armed lazily when they become active, finish loading, or report video playback.
+- Replaced Parallels-required validation docs with a local Playwright regression system for v2.
+- Kept the default disabled-sites list unchanged for conferencing and app surfaces.
+
+### Fixed
+- Added ownership tracking so disabling Auto PiP removes only `autopictureinpicture` attributes added by this extension.
+- Added explicit diagnostics and toolbar badge guidance for browsers such as Helium that register native Auto-PiP state but do not fire the native callback.
+- Added opt-in local debug logging, an options switch, and a direct `.txt` log download.
+- Added a narrow one-shot tab-leave compatibility request for currently playing videos so repeated Helium tab switches work without restoring the old fallback stack.
+- Re-armed extension-owned Auto-PiP after PiP leaves so repeated tab-switch cycles can trigger again.
+- Preserved site-owned `autopictureinpicture` and MediaSession behavior when disabling Auto PiP or blocklisting a site.
+
+### Removed
+- Removed obsolete direct-PiP fallback paths, including broad tab-leave ensure-PiP injection.
+- Removed the delayed background compatibility request that could not satisfy browser user-gesture requirements after a tab switch.
+- Removed the self-cleaning watchdog path and obsolete helper scripts.
+
 ## [1.7.6] - 2026-05-25
 
 ### Fixed

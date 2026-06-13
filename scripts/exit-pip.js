@@ -1,46 +1,34 @@
-// Exit PiP when returning to the video tab
-
 (async () => {
     'use strict';
 
-    const DEBUG = true;
-    const log = (...args) => DEBUG && console.log('[auto-pip][exit]', ...args);
-
-    log('exit-pip.js injected', { hasPiPElement: !!document.pictureInPictureElement });
-
-    const utils = window.__auto_pip_utils__ || {};
-    const { exitPiP } = utils;
+    const videoLib = window.AutoPipContent && window.AutoPipContent.video;
+    const pip = window.AutoPipContent && window.AutoPipContent.pip;
+    const path = 'cleanup';
 
     try {
-        if (exitPiP) {
-            log('Using utils.exitPiP()');
-            await exitPiP();
-        } else if (document.pictureInPictureElement) {
-            log('Fallback: exiting PiP directly');
-            await document.exitPictureInPicture();
-            const pipVideo = document.querySelector('[__pip__]');
-            if (pipVideo) {
-                pipVideo.removeAttribute('__pip__');
-            }
-        } else {
-            const pipVideo = document.querySelector('[__pip__]');
-            if (pipVideo) {
-                log('Clearing orphaned PiP marker');
-                pipVideo.removeAttribute('__pip__');
-            }
+        if (!pip) {
+            return { ok: false, exited: false, status: 'failed', reason: 'missing_pip_lib', path };
         }
 
-        // Clear registration flag so we re-register MediaSession handlers
-        // when user switches away again (sites like Twitch may overwrite handlers on focus)
-        log('Clearing __auto_pip_registered__ flag, was:', window.__auto_pip_registered__);
-        try {
-            window.__auto_pip_registered__ = false;
-        } catch (_) { }
-
-        log('Exit complete');
-        return true;
-    } catch (err) {
-        log('Exit failed:', err.message);
-        return false;
+        const pipElement = document.pictureInPictureElement;
+        const result = await pip.exitOwned();
+        return {
+            ok: result.reason !== 'pip_not_extension_managed',
+            exited: result.exited === true,
+            status: result.exited ? 'success' : 'skipped',
+            reason: result.reason,
+            path,
+            video: videoLib ? videoLib.state(pipElement) : null
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            exited: false,
+            status: 'failed',
+            reason: 'exit_failed',
+            path,
+            message: error && error.message ? error.message : String(error),
+            video: null
+        };
     }
 })();

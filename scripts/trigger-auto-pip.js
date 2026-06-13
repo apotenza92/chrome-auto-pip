@@ -1,619 +1,97 @@
-// Trigger automatic PiP via MediaSession API (Chrome 134+)
+// Isolated-world bridge for settings, page-agent debug forwarding, and lazy arming.
 
-(async function triggerAutoPiP() {
+(async function triggerAutoPiPBridge() {
     'use strict';
 
-    const DEBUG = false;
-    const log = (...args) => DEBUG && console.log('[auto-pip]', ...args);
+    const settingsLib = window.AutoPipContent && window.AutoPipContent.settings;
+    const pip = window.AutoPipContent && window.AutoPipContent.pip;
+    const path = 'native';
 
-    log('trigger-auto-pip.js injected', { url: location.href, isChild: window.top !== window });
-
-    const getHostname = () => {
+    const debugLog = (event, details = {}) => {
         try {
-            return new URL(location.href).hostname.toLowerCase();
-        } catch (_) {
-            return null;
-        }
-    };
-
-    const DEFAULT_BLOCKED_SITES = [
-        'meet.google.com',
-        '*.zoom.us',
-        'zoom.com',
-        'teams.microsoft.com',
-        'teams.live.com',
-        '*.slack.com',
-        '*.discord.com'
-    ];
-
-    const isHostBlocked = (hostname, patterns) => {
-        if (!hostname || !Array.isArray(patterns)) return false;
-        for (let i = 0; i < patterns.length; i++) {
-            const pattern = patterns[i];
-            if (!pattern || typeof pattern !== 'string') continue;
-            if (pattern.startsWith('*.')) {
-                const suffix = pattern.slice(2);
-                if (!suffix) continue;
-                if (hostname === suffix || hostname.endsWith(`.${suffix}`)) return true;
-            } else {
-                if (hostname === pattern) return true;
-                if (hostname === `www.${pattern}`) return true;
-            }
-        }
-        return false;
-    };
-
-    const getBlocklist = async () => {
-        if (!chrome?.storage) return [];
-        const readStorage = (area) => new Promise(resolve => {
-            try {
-                area.get(['autoPipSiteBlocklist'], (data) => resolve(data?.autoPipSiteBlocklist));
-            } catch (_) {
-                resolve(null);
-            }
-        });
-
-        const local = await readStorage(chrome.storage.local);
-        if (Array.isArray(local)) return local;
-        const sync = await readStorage(chrome.storage.sync);
-        return Array.isArray(sync) ? sync : DEFAULT_BLOCKED_SITES;
-    };
-
-    const hostname = getHostname();
-    if (hostname) {
-        try {
-            const blocklist = await getBlocklist();
-            if (isHostBlocked(hostname, blocklist)) {
-                window.__auto_pip_blocked__ = true;
-            } else {
-                window.__auto_pip_blocked__ = false;
-            }
+            if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+            chrome.runtime.sendMessage({
+                type: 'auto_pip_debug_log',
+                source: 'content:auto',
+                event,
+                details: {
+                    url: location.href,
+                    visibilityState: document.visibilityState,
+                    ...details
+                }
+            }, () => {
+                try { void chrome.runtime.lastError; } catch (_) { }
+            });
         } catch (_) { }
+    };
+
+    if (!window.__auto_pip_page_debug_listener__) {
+        window.addEventListener('message', (event) => {
+            const data = event && event.data;
+            if (!data || data.source !== 'chrome-auto-pip-v2-page') return;
+            debugLog(data.event || 'page_unknown', data.details || {});
+        });
+        window.__auto_pip_page_debug_listener__ = true;
     }
 
-    // Require MediaSession API
-    if (!('mediaSession' in navigator)) {
-        log('MediaSession API not supported');
-        return false;
+    if (!settingsLib) {
+        debugLog('bridge_failed', { reason: 'missing_settings_lib' });
+        return { ok: false, status: 'failed', reason: 'missing_settings_lib', path };
     }
 
-    // Respect blocked flag for per-site disables
-    if (window.__auto_pip_blocked__ === true) {
-        log('Auto-PiP blocked for this site, aborting');
-        return false;
+    let settings = null;
+    try {
+        settings = await settingsLib.getSettings();
+    } catch (_) {
+        settings = {
+            autoPipOnTabSwitch: true,
+            autoPipSiteBlocklist: settingsLib.DEFAULT_BLOCKED_SITES
+        };
     }
 
-    // Clear the disabled flag since we're being (re-)enabled
-    window.__auto_pip_disabled__ = false;
+    const hostname = settingsLib.hostname();
+    const blocked = hostname
+        ? settingsLib.isHostBlocked(hostname, settings.autoPipSiteBlocklist)
+        : false;
 
-    // Avoid double-registering on reinjection, but refresh dynamic players that
-    // create or replace their video after the first injection.
-    if (window.__auto_pip_registered__) {
-        if (typeof window.__auto_pip_refresh__ === 'function') {
-            try { window.__auto_pip_refresh__(); } catch (_) { }
-        }
-        log('Already registered, skipping');
-        return true;
-    }
+    debugLog('settings_read', {
+        autoPipOnTabSwitch: settings.autoPipOnTabSwitch,
+        blocklistCount: Array.isArray(settings.autoPipSiteBlocklist) ? settings.autoPipSiteBlocklist.length : 0
+    });
+    debugLog('host_checked', { hostname, blocked });
 
-    // Helper to check if auto-PiP is currently disabled
-    function isDisabled() {
-        return window.__auto_pip_disabled__ === true || window.__auto_pip_blocked__ === true;
-    }
-
-    // Get shared utilities (injected before this script)
-    const utils = window.__auto_pip_utils__ || {};
-    const { collectVideosDeep, isPlaying, requestPiP, getActiveSiteFix } = utils;
-
-    // Get site-specific fix configuration
-    const ACTIVE_FIX = getActiveSiteFix ? getActiveSiteFix() : null;
-    const CHAIN_MEDIA_SESSION = !!(ACTIVE_FIX && ACTIVE_FIX.chainMediaSession);
-    const HIDDEN_ATTEMPT_ONCE = !!(ACTIVE_FIX && ACTIVE_FIX.visibilityHiddenAttemptOnce);
-    const DEFER_CHILD_UNTIL_VIDEO = !!(ACTIVE_FIX && ACTIVE_FIX.deferChildUntilVideo);
-
-    const observedVideos = new Set();
-    let videoCachePrimed = false;
-    let lastDeepScanAt = 0;
-    let lastMutationVideoCheckAt = 0;
-    let refreshDueAt = 0;
-    const DEEP_RESCAN_THROTTLE_MS = 1000;
-    const MUTATION_VIDEO_CHECK_THROTTLE_MS = 1000;
-    const REFRESH_DELAY_MS = 100;
-    const HEARTBEAT_INTERVAL_MS = 1000;
-
-    function postExtensionDisabled() {
+    if (settings.autoPipOnTabSwitch === false || blocked) {
+        window.__auto_pip_disabled__ = true;
+        window.__auto_pip_blocked__ = blocked;
+        window.__auto_pip_registered__ = false;
         try {
             window.postMessage({
-                source: 'chrome-auto-pip',
-                type: 'auto_pip_extension_disabled'
+                source: 'chrome-auto-pip-v2-isolated',
+                type: 'disable_auto_pip'
             }, '*');
         } catch (_) { }
-    }
-
-    function postPageHeartbeat() {
-        if (!chrome?.runtime?.id) {
-            postExtensionDisabled();
-            return;
-        }
-
         try {
-            chrome.runtime.sendMessage({ type: 'auto_pip_heartbeat_check' }, () => {
-                if (chrome.runtime.lastError) {
-                    postExtensionDisabled();
-                    return;
-                }
-                try {
-                    window.postMessage({
-                        source: 'chrome-auto-pip',
-                        type: 'auto_pip_extension_heartbeat'
-                    }, '*');
-                } catch (_) { }
-            });
+            if (pip && typeof pip.cleanupOwnedAutoPiP === 'function') pip.cleanupOwnedAutoPiP();
         } catch (_) { }
-    }
-
-    postPageHeartbeat();
-    if (!window.__auto_pip_heartbeat_timer__) {
-        try {
-            window.__auto_pip_heartbeat_timer__ = setInterval(postPageHeartbeat, HEARTBEAT_INTERVAL_MS);
-        } catch (_) { }
-    }
-
-    function rememberVideos(videos) {
-        if (!Array.isArray(videos)) return;
-        videos.forEach(video => {
-            if (video) observedVideos.add(video);
-        });
-    }
-
-    function pruneObservedVideos() {
-        Array.from(observedVideos).forEach((video) => {
-            try {
-                if (!video || !video.isConnected) {
-                    observedVideos.delete(video);
-                }
-            } catch (_) { }
-        });
-    }
-
-    function findVideosDeep() {
-        let videos = [];
-        if (collectVideosDeep) {
-            videos = collectVideosDeep(document);
-        } else {
-            videos = Array.from(document.querySelectorAll('video'))
-                .filter(Boolean);
-        }
-        return videos;
-    }
-
-    function primeObservedVideos(force) {
-        const now = Date.now();
-        if (
-            videoCachePrimed &&
-            !force &&
-            (now - lastDeepScanAt) < DEEP_RESCAN_THROTTLE_MS
-        ) {
-            return;
-        }
-        const videos = findVideosDeep();
-        rememberVideos(videos);
-        videoCachePrimed = true;
-        lastDeepScanAt = now;
-    }
-
-    function collectAddedVideos(node) {
-        const videos = [];
-        if (!node) return videos;
-        try {
-            if (node instanceof HTMLVideoElement) {
-                videos.push(node);
-            }
-        } catch (_) { }
-        try {
-            if (node.querySelectorAll) {
-                videos.push(...node.querySelectorAll('video'));
-            }
-        } catch (_) { }
-        try {
-            if (node.shadowRoot && node.shadowRoot.querySelectorAll) {
-                videos.push(...node.shadowRoot.querySelectorAll('video'));
-            }
-        } catch (_) { }
-        return videos;
-    }
-
-    function mutationAddsVideo(mutations) {
-        let found = false;
-        mutations.forEach((mutation) => {
-            if (found) return;
-            mutation.addedNodes.forEach((node) => {
-                if (found) return;
-                const videos = collectAddedVideos(node);
-                if (videos.length > 0) {
-                    rememberVideos(videos);
-                    found = true;
-                }
-            });
-        });
-        return found;
-    }
-
-    function syncAutoPiPAttribute(video) {
-        if (!video) return;
-        const now = Date.now();
-        const playing = isPlaying ? isPlaying(video) : (!video.paused && !video.ended && video.readyState >= 2);
-        if (playing) {
-            try { video.setAttribute('data-auto-pip-last-playing-at', String(now)); } catch (_) { }
-            if (!video.hasAttribute('autopictureinpicture')) {
-                video.setAttribute('autopictureinpicture', '');
-                log('Added autopictureinpicture attribute to playing video');
-            }
-            video.setAttribute('data-auto-pip-managed', '');
-            return;
-        }
-
-        if (video.hasAttribute('data-auto-pip-managed')) {
-            video.removeAttribute('autopictureinpicture');
-            video.removeAttribute('data-auto-pip-managed');
-            log('Removed autopictureinpicture attribute from non-playing video');
-        }
-    }
-
-    // Find best video for PiP (deep search once, then cache observed videos)
-    function getEligibleVideos(options = {}) {
-        primeObservedVideos(options.forceScan === true);
-        pruneObservedVideos();
-        let videos = Array.from(observedVideos)
-            .filter(v => v && typeof v.readyState === 'number' && v.readyState >= 1);
-
-        videos.sort((a, b) => {
-            const aPlaying = isPlaying ? Number(isPlaying(a)) : 0;
-            const bPlaying = isPlaying ? Number(isPlaying(b)) : 0;
-            return bPlaying - aPlaying;
-        });
-        
-        // Add autopictureinpicture attribute to eligible videos
-        // This tells Chrome to auto-PiP when the tab becomes hidden
-        // Only add if auto-PiP is not disabled
-        if (!isDisabled()) {
-            videos.forEach(syncAutoPiPAttribute);
-        }
-        
-        return videos;
-    }
-
-    const notifyPiPState = (inPictureInPicture) => {
-        try {
-            if (chrome?.runtime?.sendMessage) {
-                chrome.runtime.sendMessage({
-                    type: 'auto_pip_pip_state_changed',
-                    inPictureInPicture: inPictureInPicture === true
-                });
-            }
-        } catch (_) { }
-    };
-
-    // Main registration function
-    function registerAll() {
-        log('registerAll() called');
-
-        // Handler for enterPiP action
-        const ensureEnterPiP = async () => {
-            log('ensureEnterPiP triggered!');
-            
-            // Check if auto-PiP has been disabled
-            if (isDisabled()) {
-                log('Auto-PiP is disabled, aborting');
-                return;
-            }
-            
-            const candidates = getEligibleVideos({ forceScan: true });
-            log('Found candidates:', candidates.length, candidates.map(v => ({ paused: v.paused, readyState: v.readyState })));
-            
-            if (candidates.length === 0) {
-                log('No candidates, aborting');
-                return;
-            }
-            if (document.pictureInPictureElement) {
-                log('Already in PiP, aborting');
-                return;
-            }
-
-            const video = isPlaying
-                ? candidates.find(isPlaying)
-                : candidates.find(v => !v.paused && !v.ended && v.readyState >= 2);
-            if (!video) {
-                log('No playing candidate, aborting');
-                return;
-            }
-            try {
-                log('Requesting PiP for video', { paused: video.paused, src: video.src?.substring(0, 50) });
-                if (requestPiP) {
-                    await requestPiP(video);
-                } else {
-                    await video.requestPictureInPicture();
-                }
-                log('Standard PiP request successful');
-            } catch (err) {
-                log('PiP request failed:', err.message);
-            }
+        debugLog(blocked ? 'blocked_by_site' : 'disabled_by_setting');
+        return {
+            ok: false,
+            status: 'skipped',
+            reason: blocked ? 'blocked_by_site' : 'disabled_by_setting',
+            path
         };
-
-        // Site-specific: Chain MediaSession handler (e.g., Twitch)
-        if (CHAIN_MEDIA_SESSION && !navigator.mediaSession.__auto_pip_patched__) {
-            log('Patching MediaSession.setActionHandler for chaining');
-            try {
-                const original = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
-                navigator.mediaSession.setActionHandler = function (action, handler) {
-                    log('setActionHandler called:', action, typeof handler);
-                    if (action === 'enterpictureinpicture') {
-                        const combined = async (...args) => {
-                            log('Chained enterpictureinpicture handler called');
-                            try { if (typeof handler === 'function') await handler(...args); } catch (_) { }
-                            try { await ensureEnterPiP(); } catch (_) { }
-                        };
-                        return original(action, combined);
-                    }
-                    return original(action, handler);
-                };
-                navigator.mediaSession.__auto_pip_patched__ = true;
-            } catch (_) { }
-        }
-
-        // Register the enterPiP handler
-        log('Registering enterpictureinpicture handler');
-        navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
-
-        // Provide baseline metadata for media session recognition
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: document.title || 'Video Content',
-            artist: window.location.hostname,
-            album: 'Auto-PiP Extension',
-            artwork: [{
-                src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="%23FF0000"/><text x="48" y="56" text-anchor="middle" fill="white" font-size="24">📺</text></svg>',
-                sizes: '96x96',
-                type: 'image/svg+xml'
-            }]
-        });
-
-        // Sync playbackState with video state
-        function updatePlaybackState(options = {}) {
-            // Check if auto-PiP has been disabled
-            if (isDisabled()) {
-                log('updatePlaybackState: Auto-PiP is disabled, skipping');
-                return;
-            }
-            
-            const candidates = getEligibleVideos(options);
-            const playingVideo = isPlaying ? candidates.find(isPlaying) : null;
-            const hasPlaying = !!playingVideo;
-            const newState = hasPlaying ? 'playing' : 'paused';
-            log('updatePlaybackState:', newState, 'candidates:', candidates.length);
-            navigator.mediaSession.playbackState = newState;
-
-            // Notify background when playback starts
-            if (hasPlaying) {
-                try {
-                    if (chrome?.runtime?.sendMessage) {
-                        chrome.runtime.sendMessage({ type: 'auto_pip_video_playing' });
-                    }
-                } catch (_) { }
-            }
-        }
-
-        const attachPiPStateBridge = (video) => {
-            if (!video || video.__autoPipStateBridgeAttached) return;
-            video.__autoPipStateBridgeAttached = true;
-            video.addEventListener('enterpictureinpicture', () => notifyPiPState(true));
-            video.addEventListener('leavepictureinpicture', () => notifyPiPState(false));
-        };
-
-        const refreshAutoPipRegistration = (options = {}) => {
-            if (isDisabled()) return;
-            const candidates = getEligibleVideos(options);
-            candidates.forEach(attachPiPStateBridge);
-            try {
-                navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
-            } catch (_) { }
-            updatePlaybackState(options);
-        };
-
-        let refreshTimer = null;
-        const scheduleRegistrationRefresh = (delay = REFRESH_DELAY_MS) => {
-            const dueAt = Date.now() + delay;
-            if (refreshTimer != null) {
-                if (dueAt >= refreshDueAt) return;
-                clearTimeout(refreshTimer);
-            }
-            refreshDueAt = dueAt;
-            refreshTimer = setTimeout(() => {
-                refreshTimer = null;
-                refreshDueAt = 0;
-                refreshAutoPipRegistration();
-            }, delay);
-        };
-
-        window.__auto_pip_refresh__ = refreshAutoPipRegistration;
-
-        // Listen for video events
-        ['play', 'playing', 'pause', 'loadedmetadata', 'loadeddata', 'canplay'].forEach(eventType => {
-            document.addEventListener(eventType, (e) => {
-                if (e.target?.tagName === 'VIDEO') {
-                    observedVideos.add(e.target);
-                    log('Video event:', eventType);
-                    if (eventType === 'pause' && document.visibilityState === 'visible') {
-                        try { e.target.setAttribute('data-auto-pip-user-paused-at', String(Date.now())); } catch (_) { }
-                    }
-                    
-                    // Check if auto-PiP has been disabled
-                    if (isDisabled()) {
-                        log('Auto-PiP is disabled, ignoring video event');
-                        return;
-                    }
-                    
-                    syncAutoPiPAttribute(e.target);
-                    attachPiPStateBridge(e.target);
-                    updatePlaybackState({ forceScan: true });
-                }
-            }, true);
-        });
-
-        // Manage MediaSession on visibility changes
-        document.addEventListener('visibilitychange', () => {
-            log('visibilitychange:', document.visibilityState);
-            
-            // Check if auto-PiP has been disabled - if so, don't do anything
-            if (isDisabled()) {
-                log('Auto-PiP is disabled, ignoring visibility change');
-                return;
-            }
-            
-            if (document.visibilityState === 'visible') {
-                // Tab became visible - refresh MediaSession state
-                log('Tab became visible, refreshing MediaSession state');
-                setTimeout(() => {
-                    // Re-check disabled state after timeout
-                    if (isDisabled()) {
-                        log('Auto-PiP disabled during timeout, aborting refresh');
-                        return;
-                    }
-                    updatePlaybackState();
-                    // Re-register our handler in case it was overwritten
-                    navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
-                    log('MediaSession refreshed on visibility');
-                }, 100);
-            } else if (document.visibilityState === 'hidden') {
-                // Tab becoming hidden - ensure MediaSession is properly set for auto-PiP
-                log('Tab becoming hidden, ensuring MediaSession is ready');
-                const candidates = getEligibleVideos({ forceScan: true });
-                if (isPlaying && candidates.some(isPlaying)) {
-                    navigator.mediaSession.playbackState = 'playing';
-                    navigator.mediaSession.setActionHandler('enterpictureinpicture', ensureEnterPiP);
-                    log('MediaSession set to playing before hide, handler registered');
-                }
-            }
-        }, true);
-
-        refreshAutoPipRegistration();
-
-        if (!window.__auto_pip_mutation_observer__) {
-            try {
-                const observer = new MutationObserver((mutations) => {
-                    const now = Date.now();
-                    const canCheckForVideos = (now - lastMutationVideoCheckAt) >= MUTATION_VIDEO_CHECK_THROTTLE_MS;
-                    if (canCheckForVideos) {
-                        lastMutationVideoCheckAt = now;
-                    }
-                    if (canCheckForVideos && mutationAddsVideo(mutations)) {
-                        scheduleRegistrationRefresh();
-                        return;
-                    }
-                });
-                observer.observe(document.documentElement || document.body, {
-                    childList: true,
-                    subtree: true
-                });
-                window.__auto_pip_mutation_observer__ = observer;
-            } catch (_) { }
-        }
-
-        // Site-specific: Fallback visibility-based PiP attempt (e.g., Twitch)
-        // Note: With autopictureinpicture attribute, browser should handle this automatically
-        // This fallback is only for cases where the browser's auto-PiP doesn't trigger
-        if (HIDDEN_ATTEMPT_ONCE) {
-            log('Setting up visibility-based PiP fallback');
-            let lastUserGestureTime = Date.now(); // Track when we last had a user gesture
-            
-            // Track user gestures so we know if we can request PiP
-            const trackGesture = () => {
-                lastUserGestureTime = Date.now();
-                log('User gesture detected');
-            };
-            document.addEventListener('click', trackGesture, true);
-            document.addEventListener('keydown', trackGesture, true);
-            
-            document.addEventListener('visibilitychange', async () => {
-                // Check if auto-PiP has been disabled
-                if (isDisabled()) {
-                    log('Auto-PiP is disabled, ignoring visibility fallback');
-                    return;
-                }
-                
-                if (document.visibilityState !== 'hidden') return;
-                if (document.pictureInPictureElement) return;
-
-                const candidates = getEligibleVideos();
-                if (candidates.length === 0) return;
-                
-                const video = isPlaying
-                    ? candidates.find(isPlaying)
-                    : candidates.find(v => !v.paused && !v.ended && v.readyState >= 2);
-                if (!video) return;
-                syncAutoPiPAttribute(video);
-                
-                // Only try manual fallback if we have a recent user gesture (within 5 seconds)
-                const timeSinceGesture = Date.now() - lastUserGestureTime;
-                if (timeSinceGesture < 5000) {
-                    log('Visibility fallback - attempting with recent user gesture');
-                    try {
-                        if (requestPiP) {
-                            await requestPiP(video);
-                        } else {
-                            await video.requestPictureInPicture();
-                        }
-                        log('Visibility fallback PiP successful');
-                    } catch (err) {
-                        log('Visibility fallback PiP failed:', err.message);
-                    }
-                } else {
-                    log('No recent user gesture, relying on autopictureinpicture attribute');
-                }
-            }, true);
-        }
-
-        window.__auto_pip_registered__ = true;
-        log('Registration complete');
-        return true;
     }
 
-    // Site-specific: Defer registration in child frames until video exists (e.g., Twitch)
-    if (DEFER_CHILD_UNTIL_VIDEO) {
-        const isChildFrame = window.top !== window;
+    window.__auto_pip_disabled__ = false;
+    window.__auto_pip_blocked__ = false;
+    window.__auto_pip_registered__ = true;
 
-        // Deep video detection including shadow DOM
-        const hasDeepVideo = () => {
-            const stack = [document];
-            while (stack.length) {
-                const root = stack.pop();
-                try {
-                    if (root.querySelector && root.querySelector('video')) return true;
-                } catch (_) { }
-                try {
-                    const all = root.querySelectorAll ? root.querySelectorAll('*') : [];
-                    for (let i = 0; i < all.length; i++) {
-                        const el = all[i];
-                        if (el && el.shadowRoot) stack.push(el.shadowRoot);
-                    }
-                } catch (_) { }
-            }
-            return false;
-        };
-
-        if (isChildFrame && !hasDeepVideo()) {
-            const observer = new MutationObserver(() => {
-                if (hasDeepVideo()) {
-                    observer.disconnect();
-                    registerAll();
-                }
-            });
-            observer.observe(document.documentElement || document.body, {
-                childList: true,
-                subtree: true
-            });
-            return true;
-        }
+    if (!('mediaSession' in navigator)) {
+        window.__auto_pip_registered__ = false;
+        debugLog('no_media_session');
+        return { ok: false, status: 'skipped', reason: 'no_media_session', path };
     }
 
-    return registerAll();
+    debugLog('bridge_armed', { path });
+    return { ok: true, status: 'armed', reason: 'settings_allow_auto_pip', path };
 })();

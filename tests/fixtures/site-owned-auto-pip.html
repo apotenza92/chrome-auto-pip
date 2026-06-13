@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Site-Owned Auto PiP Video</title>
+  </head>
+  <body>
+    <video id="video" muted autoplay loop playsinline autopictureinpicture>
+      <source src="/sample.mp4" type="video/mp4" />
+    </video>
+    <script>
+      const video = document.getElementById('video');
+      window.addEventListener('DOMContentLoaded', () => {
+        if (!video) return;
+        video.muted = true;
+        const playPromise = video.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => {});
+        }
+      }, { once: true });
+    </script>
+  </body>
+</html>

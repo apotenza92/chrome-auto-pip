@@ -11,14 +11,27 @@ This repo is a Chrome (MV3) extension. This file documents common project workfl
 
 ## Tests
 
-End-to-end tests use Playwright.
+Local regression tests use Playwright and run directly on the host macOS desktop by default.
 
-Do not run e2e/browser validation on the live host macOS desktop. Run e2e/browser validation inside the Parallels VM orchestrator targets instead, and suspend/close VMs and browser sessions after the run.
+The deterministic local suite uses Playwright Chromium with a temporary profile and the unpacked extension side-loaded. Real website smoke tests are opt-in because network, login, ads, and site layout changes can make them non-deterministic.
 
 ```bash
 npm install
-npm run test:e2e
+npm run test:local
 ```
+
+Useful local commands:
+
+```bash
+npm run test:local:static
+npm run test:local:sites
+AUTO_PIP_REAL_SITES=1 npm run test:local:sites
+npm run test:local:helium
+npm run test:local:cpu
+npm run test:local:all
+```
+
+Local test artifacts are written under `tmp/local-test-artifacts/`. Temporary browser profiles are deleted after each run unless `AUTO_PIP_KEEP_PROFILE=1` is set.
 
 ## Releases (GitHub Release ZIPs)
 

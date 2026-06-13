@@ -6,9 +6,9 @@ Free and open source.
 
 Changelog: [CHANGELOG.md](CHANGELOG.md)
 
-Automatically enables Picture-in-Picture when switching tabs like Arc or Firefox or Zen.
+Automatically opens Picture-in-Picture when you switch away from a playing video tab, with one-click manual PiP from the toolbar.
 
-Includes one click activation of Picture-in-Picture through plugin icon.
+Version 2.0 is a simpler, hardened rewrite: it lazily arms playing videos, preserves site-owned Auto-PiP behavior, cleans up only extension-owned changes, keeps conferencing and chat sites disabled by default, and includes opt-in debug logs for issue reports.
 <br><br>
 Enjoying the extension?
 
@@ -21,6 +21,8 @@ Enjoying the extension?
    1. Go to `about://flags` and search for `auto-picture-in-picture-for-video-playback`
    2. Set the flag to **Enabled**
    3. Restart your browser
+
+   Some Chromium builds also require the site to be allowed to use Automatic Picture-in-Picture from the site information menu in the address bar.
 
 2. **Install the extension** 
 
@@ -70,16 +72,53 @@ Default disabled sites:
 
 ## How It Works
 
-This extension uses Chrome's [MediaSession API](https://developer.chrome.com/blog/automatic-picture-in-picture-media-playback) to register an `enterpictureinpicture` handler and sets the `autopictureinpicture` attribute on videos. When you switch tabs away from a playing video, Chrome's built-in auto-PiP feature (enabled via the flag) automatically triggers PiP.
+This extension uses Chrome's [MediaSession API](https://developer.chrome.com/blog/automatic-picture-in-picture-media-playback) to register an `enterpictureinpicture` handler and sets the `autopictureinpicture` attribute on videos. When you switch tabs away from a playing video, Chrome's built-in auto-PiP feature can trigger PiP if the browser considers the site eligible. For Chromium browsers that do not repeat native Auto-PiP reliably, the extension also makes one immediate compatibility request for the currently playing video at the exact tab-leave moment. Paused videos are skipped, and cleanup only removes attributes added by this extension.
+
+Internally, v2 is split into small buildless modules: background modules handle settings, URL rules, debug state, script injection, tab switching, and message routing; content helpers handle video discovery and PiP ownership; command scripts perform one action and return a structured result; the page-world agent owns native Auto-PiP registration.
 
 ## Site Compatibility
 
-### Sites That Work Seamlessly
-Most video sites work automatically, including:
-- YouTube
-- Netflix
-- Vimeo
-- And many others where the video is in the main page frame
+### Browser Permission Gate
+
+Chrome's native Auto-PiP for media playback may not fire until the site is trusted by the browser. If a site is armed by the extension but native Auto-PiP does not fire, open the site information menu in the address bar and set **Automatic picture-in-picture** to **Allow** for that site.
+
+The extension cannot grant this browser site permission by itself.
+
+## Debug Logs
+
+Debug logging is off by default. To collect logs, open the extension options, turn on **Debug Logs**, reproduce the issue, then choose **Download .txt**.
+
+## Testing
+
+Local regression tests run on this Mac with Playwright Chromium and the unpacked extension side-loaded into a temporary profile.
+
+```bash
+npm install
+npm run test:local
+```
+
+Additional local checks:
+
+```bash
+npm run test:local:static   # syntax, manifest references, defaults, removed-cruft checks
+npm run test:local:cpu      # high-churn CPU regression benchmark
+npm run test:local:all      # static + fixture E2E + site smoke + CPU benchmark
+```
+
+Real website smoke tests are opt-in:
+
+```bash
+AUTO_PIP_REAL_SITES=1 npm run test:local:sites
+npm run test:local:helium
+```
+
+Useful environment variables:
+- `AUTO_PIP_LOCAL_BROWSER=chromium|helium`
+- `AUTO_PIP_LOCAL_EXECUTABLE=/path/to/browser`
+- `AUTO_PIP_REAL_SITES=1`
+- `AUTO_PIP_KEEP_PROFILE=1`
+
+Artifacts are written to `tmp/local-test-artifacts/`.
 
 ### Sites Requiring User Interaction
 
@@ -95,3 +134,4 @@ Most video sites work automatically, including:
 
 - Chrome 134+ or compatible Chromium browser
 - The `auto-picture-in-picture-for-video-playback` flag must be enabled
+- The site must have a currently playing video for tab-switch Auto PiP

@@ -6,7 +6,13 @@
     "@playwright/test": "^1.42.1"
   },
   "scripts": {
-    "test:e2e": "playwright test",
+    "test:local:static": "node scripts/local-test/static-checks.js",
+    "test:local": "npm run test:local:static && playwright test --config=playwright.local.config.js",
+    "test:local:sites": "node scripts/local-test/run-sites.js",
+    "test:local:helium": "AUTO_PIP_LOCAL_BROWSER=helium AUTO_PIP_REAL_SITES=1 node scripts/local-test/run-sites.js",
+    "test:local:cpu": "node scripts/local-test/run-cpu.js",
+    "test:local:all": "npm run test:local && npm run test:local:sites && npm run test:local:cpu",
+    "test:e2e": "npm run test:local",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:preupdate": "node tmp/orchestrator/scripts/pre-update-e2e.js",
     "test:e2e:footage": "node tmp/orchestrator/scripts/capture-vm-footage.js"

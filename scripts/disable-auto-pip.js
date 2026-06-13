@@ -1,47 +1,41 @@
-// Disable Auto-PiP behavior on this page without clearing MediaSession
-
 (function disableAutoPiP() {
     'use strict';
 
+    const videoLib = window.AutoPipContent && window.AutoPipContent.video;
+    const pip = window.AutoPipContent && window.AutoPipContent.pip;
+    const path = 'cleanup';
+
+    try { window.__auto_pip_disabled__ = true; } catch (_) { }
+    try { window.__auto_pip_blocked__ = true; } catch (_) { }
+    try { window.__auto_pip_registered__ = false; } catch (_) { }
     try {
-        window.__auto_pip_disabled__ = true;
+        window.postMessage({
+            source: 'chrome-auto-pip-v2-isolated',
+            type: 'disable_auto_pip'
+        }, '*');
     } catch (_) { }
 
     try {
-        window.__auto_pip_blocked__ = true;
-    } catch (_) { }
-
-    try {
-        window.__auto_pip_registered__ = false;
-    } catch (_) { }
-
-    const disableVideo = (video) => {
-        if (!video) return;
-        if (!video.hasAttribute('data-auto-pip-managed')) return;
-        try { video.removeAttribute('autopictureinpicture'); } catch (_) { }
-        try { video.removeAttribute('data-auto-pip-managed'); } catch (_) { }
-    };
-
-    const disableAllVideos = (root) => {
-        if (!root || !root.querySelectorAll) return;
-        try {
-            root.querySelectorAll('video').forEach(disableVideo);
-        } catch (_) { }
-    };
-
-    try {
-        disableAllVideos(document);
-
-        const allElements = document.querySelectorAll('*');
-        allElements.forEach(el => {
-            if (!el.shadowRoot) return;
-            try {
-                disableAllVideos(el.shadowRoot);
-            } catch (_) { }
-        });
-    } catch (_) { }
-
-    return true;
-
-    return true;
+        if (typeof window.__auto_pip_cleanup_owned__ === 'function') {
+            window.__auto_pip_cleanup_owned__();
+        } else if (pip && typeof pip.cleanupOwnedAutoPiP === 'function') {
+            pip.cleanupOwnedAutoPiP();
+        }
+        return {
+            ok: true,
+            status: 'success',
+            reason: 'extension_owned_state_removed',
+            path,
+            video: videoLib ? videoLib.state(null) : null
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            status: 'failed',
+            reason: 'cleanup_failed',
+            path,
+            message: error && error.message ? error.message : String(error),
+            video: videoLib ? videoLib.state(null) : null
+        };
+    }
 })();

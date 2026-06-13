@@ -3,28 +3,19 @@
 
     const videoLib = window.AutoPipContent && window.AutoPipContent.video;
     const pip = window.AutoPipContent && window.AutoPipContent.pip;
-    const path = 'manual';
+    const path = 'tab_leave_compat';
 
     try {
         if (!videoLib || !pip) {
             return { ok: false, status: 'failed', reason: 'missing_content_lib', path };
         }
 
-        if (document.pictureInPictureElement) {
-            const exited = await pip.exitOwned();
-            return {
-                ok: exited.reason !== 'pip_not_extension_managed',
-                status: exited.exited ? 'toggled_off' : 'skipped',
-                reason: exited.reason,
-                path,
-                video: videoLib.state(document.pictureInPictureElement)
-            };
+        if (window.__auto_pip_disabled__ === true || window.__auto_pip_blocked__ === true) {
+            return videoLib.result(false, 'skipped', 'disabled_or_blocked', path, null);
         }
 
-        const stale = document.querySelector('[__pip__]');
-        if (stale) {
-            pip.cleanupVideo(stale);
-            return videoLib.result(true, 'toggled_off', 'stale_marker_removed', path, stale);
+        if (document.pictureInPictureElement) {
+            return videoLib.result(true, 'already_active', 'already_active', path, document.pictureInPictureElement);
         }
 
         const candidates = videoLib.findVideos({
@@ -34,20 +25,19 @@
             playingFirst: true,
             includeDisabled: true
         }).filter(video =>
-            videoLib.isPlaying(video) ||
-            videoLib.isPausedCandidate(video) ||
-            (Number(video.readyState) >= 2 && Number(video.duration || 0) > 0 && !video.ended)
+            videoLib.isPlaying(video) &&
+            typeof video.requestPictureInPicture === 'function'
         );
 
         const video = candidates[0] || null;
-        if (!video || typeof video.requestPictureInPicture !== 'function') {
-            return videoLib.result(false, 'skipped', 'no_video_candidate', path, null);
+        if (!video) {
+            return videoLib.result(false, 'skipped', 'no_playing_video', path, null);
         }
 
         await pip.request(video, {
             allowDisablePictureInPictureOverride: true,
-            ensureAutoPipAttr: false,
-            compat: false
+            ensureAutoPipAttr: true,
+            compat: true
         });
         return videoLib.result(true, 'success', 'requested_picture_in_picture', path, video);
     } catch (error) {

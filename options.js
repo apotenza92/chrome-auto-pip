@@ -5,6 +5,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const manualSiteInput = document.getElementById('manualSiteInput');
     const addManualSiteButton = document.getElementById('addManualSite');
     const blockedSitesList = document.getElementById('blockedSitesList');
+    const autoPipBlockerStatus = document.getElementById('autoPipBlockerStatus');
+    const autoPipDebugEnabledToggle = document.getElementById('autoPipDebugEnabled');
+    const downloadDebugLogButton = document.getElementById('downloadDebugLog');
 
     const DEFAULT_BLOCKED_SITES = [
         'meet.google.com',
@@ -19,6 +22,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let blockedSites = DEFAULT_BLOCKED_SITES.slice();
 
     autoPipOnTabSwitchToggle.disabled = true;
+    autoPipDebugEnabledToggle.disabled = true;
+    downloadDebugLogButton.disabled = true;
     setBlocklistControlsDisabled(true);
 
     function normalizeHostEntry(value) {
@@ -67,6 +72,82 @@ document.addEventListener('DOMContentLoaded', async () => {
         addCurrentSiteButton.disabled = disabled;
         manualSiteInput.disabled = disabled;
         addManualSiteButton.disabled = disabled;
+    }
+
+    function renderAutoPipBlocker(blocker) {
+        if (!autoPipBlockerStatus) return;
+        autoPipBlockerStatus.innerHTML = '';
+        if (!blocker || typeof blocker !== 'object') {
+            autoPipBlockerStatus.style.display = 'none';
+            return;
+        }
+
+        const title = document.createElement('strong');
+        title.textContent = 'Auto PiP was blocked by the browser.';
+        const message = document.createElement('div');
+        const host = blocker.hostname || 'this site';
+        message.textContent = `Open the site information menu for ${host} and set Automatic picture-in-picture to Allow.`;
+        const details = document.createElement('div');
+        details.textContent = `Playback: audible candidates ${Number(blocker.playingAudibleCandidateCount || 0)}, muted playing videos ${Number(blocker.playingMutedCount || 0)}.`;
+
+        autoPipBlockerStatus.appendChild(title);
+        autoPipBlockerStatus.appendChild(message);
+        autoPipBlockerStatus.appendChild(details);
+        autoPipBlockerStatus.style.display = 'block';
+    }
+
+    function renderDebugControls() {
+        downloadDebugLogButton.disabled = !autoPipDebugEnabledToggle.checked;
+    }
+
+    function getDebugLogText(data) {
+        const log = Array.isArray(data.autoPipDebugLog) ? data.autoPipDebugLog : [];
+        const text = typeof data.autoPipDebugText === 'string' ? data.autoPipDebugText : '';
+        const blocker = data.autoPipLatestBlocker || null;
+        const manifest = chrome.runtime.getManifest();
+
+        return [
+            'Chrome Auto PiP debug log',
+            `Extension version: ${manifest.version || 'unknown'}`,
+            `Generated at: ${new Date().toISOString()}`,
+            `Debug logging enabled: ${data.autoPipDebugEnabled === true ? 'yes' : 'no'}`,
+            `User agent: ${navigator.userAgent}`,
+            '',
+            'Latest blocker:',
+            blocker ? JSON.stringify(blocker, null, 2) : 'None recorded.',
+            '',
+            'Events:',
+            text || log.map(entry => JSON.stringify(entry)).join('\n') || 'No debug events recorded.'
+        ].join('\n');
+    }
+
+    function getDebugLogFilename(data) {
+        const manifest = chrome.runtime.getManifest();
+        const version = String(manifest.version || 'unknown').replace(/[^a-z0-9.-]+/gi, '-');
+        const blocker = data.autoPipLatestBlocker || null;
+        const host = blocker && blocker.hostname
+            ? String(blocker.hostname).replace(/[^a-z0-9.-]+/gi, '-')
+            : 'general';
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        return `chrome-auto-pip-debug-${version}-${host}-${stamp}.txt`;
+    }
+
+    async function downloadDebugLog() {
+        const data = await chrome.storage.local.get([
+            'autoPipDebugEnabled',
+            'autoPipDebugLog',
+            'autoPipDebugText',
+            'autoPipLatestBlocker'
+        ]);
+        const blob = new Blob([getDebugLogText(data)], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = getDebugLogFilename(data);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     function renderBlockedSites() {
@@ -162,8 +243,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             const local = await chrome.storage.local.get([
                 'autoPipOnTabSwitch',
                 'autoPipEnabled',
-                'autoPipSiteBlocklist'
+                'autoPipSiteBlocklist',
+                'autoPipDebugEnabled',
+                'autoPipLatestBlocker'
             ]);
+
+            autoPipDebugEnabledToggle.checked = local.autoPipDebugEnabled === true;
+            renderDebugControls();
+            renderAutoPipBlocker(local.autoPipLatestBlocker);
 
             if (typeof local.autoPipOnTabSwitch === 'boolean') {
                 autoPipOnTabSwitchToggle.checked = local.autoPipOnTabSwitch;
@@ -206,7 +293,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             try {
                 await chrome.storage.local.set({
                     autoPipOnTabSwitch: autoPipOnTabSwitchToggle.checked,
-                    autoPipSiteBlocklist: blockedSites
+                    autoPipSiteBlocklist: blockedSites,
+                    autoPipDebugEnabled: autoPipDebugEnabledToggle.checked
                 });
             } catch (_) { }
         } catch (_) {
@@ -242,6 +330,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    async function saveDebugSetting() {
+        const enabled = autoPipDebugEnabledToggle.checked;
+        autoPipDebugEnabledToggle.disabled = true;
+
+        try {
+            await chrome.storage.local.set({
+                autoPipDebugEnabled: enabled,
+                autoPipDebugLog: [],
+                autoPipDebugText: ''
+            });
+            renderDebugControls();
+        } finally {
+            autoPipDebugEnabledToggle.disabled = false;
+        }
+    }
+
     async function saveBlocklist(next) {
         blockedSites = next;
         renderBlockedSites();
@@ -258,9 +362,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadSettingsWithFallback();
     autoPipOnTabSwitchToggle.disabled = false;
+    autoPipDebugEnabledToggle.disabled = false;
+    renderDebugControls();
     setBlocklistControlsDisabled(false);
 
     autoPipOnTabSwitchToggle.addEventListener('change', saveSettings);
+    autoPipDebugEnabledToggle.addEventListener('change', saveDebugSetting);
+    downloadDebugLogButton.addEventListener('click', downloadDebugLog);
 
     addCurrentSiteButton.addEventListener('click', () => {
         const normalized = normalizeHostEntry(currentSiteSelect.value);
@@ -283,6 +391,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes.autoPipLatestBlocker) {
+            renderAutoPipBlocker(changes.autoPipLatestBlocker.newValue);
+        }
+
+        if (namespace === 'local' && changes.autoPipDebugEnabled) {
+            autoPipDebugEnabledToggle.checked = changes.autoPipDebugEnabled.newValue === true;
+            renderDebugControls();
+        }
+
         if (namespace !== 'sync') return;
 
         const tabSwitchChange = changes.autoPipOnTabSwitch ? changes.autoPipOnTabSwitch.newValue : undefined;

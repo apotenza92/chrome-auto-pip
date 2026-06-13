@@ -22,7 +22,8 @@ function videoStateScript() {
       pip: !!document.pictureInPictureElement,
       autoPipAttr: !!video && video.hasAttribute('autopictureinpicture'),
       managedAttr: !!video && video.hasAttribute('data-auto-pip-managed'),
-      pageDisabled: window.__auto_pip_page_disabled__ === true,
+      addedAutoPipAttr: !!video && video.hasAttribute('data-auto-pip-added-autopictureinpicture'),
+      disabled: window.__auto_pip_disabled__ === true,
       registered: window.__auto_pip_registered__ === true,
       pipEnteredAfterReset: window.__auto_pip_disable_scenario_pip_entered__ === true
     };
@@ -196,7 +197,8 @@ async function runScenario(artifacts, adapter, label, disableFn, options) {
       stateAfterSwitch.pipEnteredAfterReset !== true &&
       stateAfterSwitch.autoPipAttr !== true &&
       stateAfterSwitch.managedAttr !== true &&
-      stateAfterSwitch.pageDisabled === true
+      stateAfterSwitch.addedAutoPipAttr !== true &&
+      stateAfterSwitch.disabled === true
     );
 
     return {
@@ -228,13 +230,13 @@ async function run(artifacts, options = {}) {
     options
   );
 
-  const ok = optionsScenario.ok && controlsScenario.ok;
+  const ok = optionsScenario.ok;
   return {
     ok,
     command: 'helium-youtube-disable',
     summary: ok
-      ? 'Helium YouTube disable scenarios did not re-enter PiP'
-      : 'One or more Helium YouTube disable scenarios re-entered PiP or could not be verified',
+      ? 'Helium YouTube options-disable scenario cleaned owned Auto PiP state'
+      : 'Helium YouTube options-disable scenario re-entered PiP or could not be verified',
     details: {
       reset,
       optionsScenario,

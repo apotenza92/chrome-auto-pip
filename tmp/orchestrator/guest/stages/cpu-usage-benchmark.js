@@ -119,7 +119,6 @@ async function runScenario(artifacts, options, fixture, scenario) {
       }
       pageFlags = await page.evaluate(() => ({
         isolatedRegistered: window.__auto_pip_registered__ === true,
-        mainWorldRegistered: !!(window.__auto_pip_page_state__ && window.__auto_pip_page_state__.registered),
         autoPipVideos: document.querySelectorAll('video[autopictureinpicture]').length,
         managedVideos: document.querySelectorAll('video[data-auto-pip-managed]').length
       }));

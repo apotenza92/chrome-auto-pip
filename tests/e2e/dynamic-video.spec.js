@@ -1,217 +1,80 @@
 const { test, expect } = require('../fixtures/extension-fixture');
 const { startStaticServer } = require('../fixtures/static-server');
 
-test('tab switch registration follows dynamically-created player video', async ({ context }) => {
+test('dynamic and shadow videos arm and enter PiP', async ({ context }) => {
   test.setTimeout(120000);
 
   const worker = context.__autoPipExtensionWorker || context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
   const { server, baseURL } = await startStaticServer();
-  const videoUrl = `${baseURL}/delayed-video.html`;
+  const openedPages = [];
 
-  const createTab = async () => {
-    return worker.evaluate(async (url) => {
-      const waitForTabComplete = (tabId) => new Promise(resolve => {
-        chrome.tabs.get(tabId, (tab) => {
-          if (tab && tab.status === 'complete') return resolve();
-          const listener = (updatedId, info) => {
-            if (updatedId === tabId && info.status === 'complete') {
-              chrome.tabs.onUpdated.removeListener(listener);
-              resolve();
-            }
-          };
-          chrome.tabs.onUpdated.addListener(listener);
-        });
-      });
+  const delayedFlags = async (page) => page.evaluate(() => {
+    const video = document.querySelector('video');
+    return {
+      hasVideo: !!video,
+      playing: !!video && !video.paused && !video.ended && video.readyState >= 2,
+      autoPipAttr: !!video && video.hasAttribute('autopictureinpicture'),
+      playbackState: navigator.mediaSession ? navigator.mediaSession.playbackState : null,
+      inPictureInPicture: document.pictureInPictureElement === video
+    };
+  });
 
-      const tab = await new Promise(resolve => {
-        chrome.tabs.create({ url, active: true }, resolve);
-      });
+  const shadowFlags = async (page) => page.evaluate(() => {
+    const host = document.getElementById('host');
+    const video = host && host.shadowRoot ? host.shadowRoot.querySelector('video') : null;
+    return {
+      hasVideo: !!video,
+      started: window.__shadow_late_ready_started__ === true,
+      churnTick: window.__shadow_late_ready_tick__ || 0,
+      playing: !!video && !video.paused && !video.ended && video.readyState >= 2,
+      autoPipAttr: !!video && video.hasAttribute('autopictureinpicture'),
+      playbackState: navigator.mediaSession ? navigator.mediaSession.playbackState : null
+    };
+  });
 
-      if (tab && tab.id != null) {
-        await waitForTabComplete(tab.id);
-      }
-
-      return tab ? tab.id : null;
-    }, videoUrl);
-  };
-
-  const getFlags = async (tabId) => {
-    return worker.evaluate(async (id) => {
-      const result = await chrome.scripting.executeScript({
-        target: { tabId: id },
-        func: () => {
-          const video = document.querySelector('video');
-          return {
-            hasVideo: !!video,
-            playing: !!video && !video.paused && !video.ended && video.readyState >= 2,
-            registered: window.__auto_pip_registered__ === true,
-            autoPipAttr: !!video && video.hasAttribute('autopictureinpicture'),
-            playbackState: navigator.mediaSession ? navigator.mediaSession.playbackState : null
-          };
-        }
-      });
-      return result && result[0] ? result[0].result : {
-        hasVideo: false,
-        playing: false,
-        registered: false,
-        autoPipAttr: false,
-        playbackState: null
-      };
-    }, tabId);
-  };
-
-  let tabId = null;
   try {
-    tabId = await createTab();
-    await expect.poll(async () => getFlags(tabId), { timeout: 15000 }).toMatchObject({
-      hasVideo: true,
-      playing: true,
-      registered: true,
-      autoPipAttr: true,
-      playbackState: 'playing'
-    });
-  } finally {
-    if (tabId != null) {
-      await worker.evaluate((id) => chrome.tabs.remove(id), tabId).catch(() => {});
-    }
-    server.close();
-  }
-});
+    const delayedPage = await context.newPage();
+    openedPages.push(delayedPage);
+    await delayedPage.goto(`${baseURL}/delayed-video.html`);
 
-test('tab switch enters PiP for dynamically-created player video', async ({ context }) => {
-  test.setTimeout(120000);
-
-  const { server, baseURL } = await startStaticServer();
-  const videoUrl = `${baseURL}/delayed-video.html`;
-  const blankUrl = `${baseURL}/blank.html`;
-
-  const getFlags = async (page) => {
-    return page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (!video) {
-        return {
-          hasVideo: false,
-          playing: false,
-          autoPipAttr: false,
-          playbackState: null,
-          inPictureInPicture: false
-        };
-      }
-
-      return {
-        hasVideo: true,
-        playing: !video.paused && !video.ended && video.readyState >= 2,
-        autoPipAttr: video.hasAttribute('autopictureinpicture'),
-        playbackState: navigator.mediaSession ? navigator.mediaSession.playbackState : null,
-        inPictureInPicture: document.pictureInPictureElement === video
-      };
-    });
-  };
-
-  let videoPage = null;
-  let blankPage = null;
-  try {
-    videoPage = await context.newPage();
-    await videoPage.goto(videoUrl);
-    await expect.poll(async () => getFlags(videoPage), { timeout: 15000 }).toMatchObject({
+    await expect.poll(async () => delayedFlags(delayedPage), { timeout: 15000 }).toMatchObject({
       hasVideo: true,
       playing: true,
       autoPipAttr: true,
       playbackState: 'playing'
     });
 
-    blankPage = await context.newPage();
-    await blankPage.goto(blankUrl);
+    const blankPage = await context.newPage();
+    openedPages.push(blankPage);
+    await blankPage.goto(`${baseURL}/blank.html`);
     await blankPage.bringToFront();
-    await expect.poll(async () => getFlags(videoPage), { timeout: 10000 }).toMatchObject({
+
+    await expect.poll(async () => delayedFlags(delayedPage), { timeout: 10000 }).toMatchObject({
       inPictureInPicture: true
     });
-  } finally {
-    if (blankPage) await blankPage.close().catch(() => {});
-    if (videoPage) await videoPage.close().catch(() => {});
-    server.close();
-  }
-});
 
-test('registration refreshes when an existing shadow video becomes ready during player churn', async ({ context }) => {
-  test.setTimeout(120000);
+    await delayedPage.close();
 
-  const worker = context.__autoPipExtensionWorker || context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-  const { server, baseURL } = await startStaticServer();
-  const videoUrl = `${baseURL}/shadow-late-ready-video.html`;
+    const shadowPage = await context.newPage();
+    openedPages.push(shadowPage);
+    await shadowPage.goto(`${baseURL}/shadow-late-ready-video.html`);
 
-  const createTab = async () => {
-    return worker.evaluate(async (url) => {
-      const waitForTabComplete = (tabId) => new Promise(resolve => {
-        chrome.tabs.get(tabId, (tab) => {
-          if (tab && tab.status === 'complete') return resolve();
-          const listener = (updatedId, info) => {
-            if (updatedId === tabId && info.status === 'complete') {
-              chrome.tabs.onUpdated.removeListener(listener);
-              resolve();
-            }
-          };
-          chrome.tabs.onUpdated.addListener(listener);
-        });
-      });
-
-      const tab = await new Promise(resolve => {
-        chrome.tabs.create({ url, active: true }, resolve);
-      });
-
-      if (tab && tab.id != null) {
-        await waitForTabComplete(tab.id);
-      }
-
-      return tab ? tab.id : null;
-    }, videoUrl);
-  };
-
-  const getFlags = async (tabId) => {
-    return worker.evaluate(async (id) => {
-      const result = await chrome.scripting.executeScript({
-        target: { tabId: id },
-        world: 'MAIN',
-        func: () => {
-          const host = document.getElementById('host');
-          const video = host && host.shadowRoot ? host.shadowRoot.querySelector('video') : null;
-          return {
-            hasVideo: !!video,
-            started: window.__shadow_late_ready_started__ === true,
-            churnTick: window.__shadow_late_ready_tick__ || 0,
-            playing: !!video && !video.paused && !video.ended && video.readyState >= 2,
-            autoPipAttr: !!video && video.hasAttribute('autopictureinpicture'),
-            playbackState: navigator.mediaSession ? navigator.mediaSession.playbackState : null
-          };
-        }
-      });
-
-      return result && result[0] ? result[0].result : {
-        hasVideo: false,
-        started: false,
-        churnTick: 0,
-        playing: false,
-        autoPipAttr: false,
-        playbackState: null
-      };
-    }, tabId);
-  };
-
-  let tabId = null;
-  try {
-    tabId = await createTab();
-    await expect.poll(async () => getFlags(tabId), { timeout: 15000 }).toMatchObject({
+    await expect.poll(async () => shadowFlags(shadowPage), { timeout: 15000 }).toMatchObject({
       hasVideo: true,
       started: true,
       playing: true,
       autoPipAttr: true,
       playbackState: 'playing'
     });
-    expect((await getFlags(tabId)).churnTick).toBeGreaterThan(0);
+    expect((await shadowFlags(shadowPage)).churnTick).toBeGreaterThan(0);
+
+    const background = await worker.evaluate(() => ({
+      currentTab: AutoPip.state.currentTab,
+      targetTab: AutoPip.state.targetTab
+    }));
+    expect(background.targetTab).not.toBeNull();
   } finally {
-    if (tabId != null) {
-      await worker.evaluate((id) => chrome.tabs.remove(id), tabId).catch(() => {});
-    }
+    await Promise.all(openedPages.map(page => page.isClosed() ? null : page.close().catch(() => {})));
     server.close();
   }
 });

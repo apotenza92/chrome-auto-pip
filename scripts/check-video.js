@@ -1,35 +1,36 @@
-// Check if page has a playing video
-
-(function hasPlayingVideo() {
+(function checkVideo() {
     'use strict';
 
-    const utils = window.__auto_pip_utils__ || {};
-    const { findAllVideos, isPlaying } = utils;
+    const videoLib = window.AutoPipContent && window.AutoPipContent.video;
+    const path = 'check';
 
     try {
-        let candidates;
-        if (findAllVideos) {
-            candidates = findAllVideos({
-                deep: false,
-                minReadyState: 1,
-                visibleOnly: true,
-                playingFirst: false
-            });
-        } else {
-            // Fallback
-            candidates = Array.from(document.querySelectorAll('video'))
-                .filter(v => v.readyState >= 1)
-                .filter(v => {
-                    const rect = v.getClientRects()[0];
-                    return rect && rect.width > 0 && rect.height > 0;
-                });
+        if (!videoLib) {
+            return { ok: false, status: 'failed', reason: 'missing_video_lib', path };
         }
 
-        if (candidates.length === 0) return false;
+        const videos = videoLib.findVideos({
+            deep: true,
+            minReadyState: 1,
+            visibleOnly: true,
+            playingFirst: true,
+            includeDisabled: true
+        });
+        const video = videos.find(videoLib.isPlaying) || null;
 
-        const checkPlaying = isPlaying || (v => v.currentTime > 0 && !v.paused && !v.ended);
-        return candidates.some(checkPlaying);
-    } catch (_) {
-        return false;
+        if (!video) {
+            return videoLib.result(false, 'skipped', 'no_playing_video', path, null);
+        }
+
+        return videoLib.result(true, 'success', 'playing_video_found', path, video);
+    } catch (error) {
+        return {
+            ok: false,
+            status: 'failed',
+            reason: 'check_failed',
+            path,
+            message: error && error.message ? error.message : String(error),
+            video: null
+        };
     }
 })();

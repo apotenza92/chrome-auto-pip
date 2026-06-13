@@ -104,6 +104,10 @@ jobs:
             # Copy only the extension runtime files needed for "Load unpacked"
             cp "wt-${version}/manifest.json" "wt-${version}/main.js" "wt-${version}/options.html" "wt-${version}/options.js" "wt-${version}/PRIVACY.md" "dist/${name}/"
             cp -R "wt-${version}/assets" "wt-${version}/scripts" "dist/${name}/"
+            if [ -d "wt-${version}/background" ]; then cp -R "wt-${version}/background" "dist/${name}/"; fi
+            rm -rf "dist/${name}/scripts/local-test"
+            find "dist/${name}" -name .DS_Store -delete
+            rm -f "dist/${name}/assets/icon.afdesign"
 
             # Always include the latest CHANGELOG/README from main branch (not necessarily present in old commits)
             cp README.md "dist/${name}/" || true

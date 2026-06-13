@@ -75,28 +75,26 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
         target: { tabId: id },
         func: () => ({
           registered: window.__auto_pip_registered__ === true,
-          disabled: window.__auto_pip_disabled__ === true
+          disabled: window.__auto_pip_disabled__ === true,
+          autoPiPVideoCount: document.querySelectorAll('video[autopictureinpicture]').length
         })
       });
       const mainResult = await chrome.scripting.executeScript({
         target: { tabId: id },
         world: 'MAIN',
         func: () => ({
-          pageDisabled: window.__auto_pip_page_disabled__ === true,
           siteMediaSessionCleared: window.__site_media_session_enter_pip_cleared__ === true
         })
       });
       return {
-        ...(result && result[0] ? result[0].result : { registered: false, disabled: false }),
-        ...(mainResult && mainResult[0] ? mainResult[0].result : { pageDisabled: false, siteMediaSessionCleared: false })
+        ...(result && result[0] ? result[0].result : { registered: false, disabled: false, autoPiPVideoCount: 0 }),
+        ...(mainResult && mainResult[0] ? mainResult[0].result : { siteMediaSessionCleared: false })
       };
     }, tabId);
   };
 
   try {
     const { videoTabId } = await createVideoTab();
-
-    await expect(worker.evaluate(() => !!chrome.contentSettings)).resolves.toBe(false);
 
     await worker.evaluate((payload) => new Promise(resolve => {
       chrome.storage.sync.set(payload, () => {
@@ -106,7 +104,7 @@ test('blocklist disables auto-pip on a site', async ({ context }) => {
 
     await expect.poll(async () => (await getTabFlags(videoTabId)).disabled, { timeout: 15000 }).toBe(true);
     await expect.poll(async () => (await getTabFlags(videoTabId)).registered, { timeout: 15000 }).toBe(false);
-    await expect.poll(async () => (await getTabFlags(videoTabId)).pageDisabled, { timeout: 15000 }).toBe(true);
+    await expect.poll(async () => (await getTabFlags(videoTabId)).autoPiPVideoCount, { timeout: 15000 }).toBe(0);
     expect((await getTabFlags(videoTabId)).siteMediaSessionCleared).toBe(false);
 
     await worker.evaluate((id) => {

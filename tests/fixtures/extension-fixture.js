@@ -1,123 +1,35 @@
-const path = require('path');
-const os = require('os');
-const fs = require('fs');
-const { chromium, test: base, expect } = require('@playwright/test');
-
-const extensionPath = path.resolve(__dirname, '..', '..');
-const configuredBrowser = process.env.AUTO_PIP_PLAYWRIGHT_BROWSER || 'chromium';
-const configuredChannel = process.env.AUTO_PIP_PLAYWRIGHT_CHANNEL || null;
-const configuredExecutable = process.env.AUTO_PIP_PLAYWRIGHT_EXECUTABLE || null;
-
-if (configuredBrowser !== 'chromium') {
-  throw new Error(`Unsupported AUTO_PIP_PLAYWRIGHT_BROWSER='${configuredBrowser}'. Extension fixture requires Chromium.`);
-}
-
-async function waitForExtensionWorker(context, timeoutMs = 45000) {
-  const startedAt = Date.now();
-  let wakePage = null;
-  let nextWakeAt = 0;
-
-  const wakeExtensionWorker = async () => {
-    try {
-      if (!wakePage || wakePage.isClosed()) {
-        wakePage = await context.newPage();
-      }
-      await wakePage.goto(`data:text/html,<title>Auto%20PiP%20worker%20wake</title>${Date.now()}`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 5000
-      });
-    } catch (_) {
-      if (wakePage && !wakePage.isClosed()) {
-        await wakePage.close().catch(() => {});
-      }
-      wakePage = null;
-    }
-  };
-
-  while ((Date.now() - startedAt) < timeoutMs) {
-    const existing = context.serviceWorkers()[0];
-    if (existing) {
-      if (wakePage && !wakePage.isClosed()) {
-        await wakePage.close().catch(() => {});
-      }
-      return existing;
-    }
-
-    if (Date.now() >= nextWakeAt) {
-      await wakeExtensionWorker();
-      nextWakeAt = Date.now() + 5000;
-    }
-
-    try {
-      const worker = await context.waitForEvent('serviceworker', { timeout: 1000 });
-      if (wakePage && !wakePage.isClosed()) {
-        await wakePage.close().catch(() => {});
-      }
-      return worker;
-    } catch (_) {
-      // Keep polling until the overall timeout expires.
-    }
-  }
-  if (wakePage && !wakePage.isClosed()) {
-    await wakePage.close().catch(() => {});
-  }
-  throw new Error(`Timed out waiting for extension service worker after ${timeoutMs}ms`);
-}
-
-async function launchExtensionContext() {
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-pip-'));
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless: false,
-    channel: configuredChannel || undefined,
-    executablePath: configuredExecutable || undefined,
-    args: [
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
-      '--enable-features=AutoPictureInPictureForVideoPlayback,MediaSessionEnterPictureInPicture,BrowserInitiatedAutomaticPictureInPicture',
-      '--autoplay-policy=no-user-gesture-required',
-      '--no-first-run',
-      '--no-default-browser-check'
-    ]
-  });
-  return { context, userDataDir };
-}
-
-async function closeExtensionContext(context, userDataDir) {
-  if (context) {
-    await context.close().catch(() => {});
-  }
-  if (userDataDir) {
-    fs.rmSync(userDataDir, { recursive: true, force: true });
-  }
-}
+const { test: base, expect } = require('@playwright/test');
+const { launchLocalContext, waitForExtensionWorker } = require('../../scripts/local-test/local-session');
 
 const test = base.extend({
   context: async ({}, use) => {
-    let launchedContext = null;
-    let launchedUserDataDir = null;
+    let session = null;
     let worker = null;
 
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const launched = await launchExtensionContext();
-      launchedContext = launched.context;
-      launchedUserDataDir = launched.userDataDir;
+      session = await launchLocalContext({
+        artifactPrefix: 'playwright',
+        autoPiPOrigins: ['https://www.youtube.com', 'https://music.youtube.com', 'https://shaka-player-demo.appspot.com']
+      });
+      if (session.skipped) {
+        throw new Error(session.skipReason);
+      }
 
       try {
-        worker = await waitForExtensionWorker(launchedContext);
-        launchedContext.__autoPipExtensionWorker = worker;
+        worker = session.worker || await waitForExtensionWorker(session.context);
+        session.context.__autoPipExtensionWorker = worker;
         break;
       } catch (error) {
-        await closeExtensionContext(launchedContext, launchedUserDataDir);
-        launchedContext = null;
-        launchedUserDataDir = null;
+        await session.close();
+        session = null;
         if (attempt >= 2) throw error;
       }
     }
 
     try {
-      await use(launchedContext);
+      await use(session.context);
     } finally {
-      await closeExtensionContext(launchedContext, launchedUserDataDir);
+      if (session) await session.close();
     }
   },
   extensionId: async ({ context }, use) => {

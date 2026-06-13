@@ -90,7 +90,10 @@ jobs:
 
           # Copy only the extension runtime files needed for "Load unpacked"
           cp manifest.json main.js options.html options.js PRIVACY.md "dist/${NAME}/"
-          cp -R assets scripts "dist/${NAME}/"
+          cp -R assets background scripts "dist/${NAME}/"
+          rm -rf "dist/${NAME}/scripts/local-test"
+          find "dist/${NAME}" -name .DS_Store -delete
+          rm -f "dist/${NAME}/assets/icon.afdesign"
 
           # Optional docs
           if [ -f README.md ]; then cp README.md "dist/${NAME}/"; fi

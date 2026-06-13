@@ -129,6 +129,24 @@
                 color: #92400e;
             }
 
+            .status-panel {
+                display: none;
+                margin: 0 0 16px 0;
+                padding: 12px;
+                border: 1px solid #f59e0b;
+                border-radius: 8px;
+                background: #fffbeb;
+                color: #78350f;
+                font-size: 13px;
+                line-height: 1.45;
+            }
+
+            .status-panel strong {
+                display: block;
+                margin-bottom: 4px;
+                color: #92400e;
+            }
+
             select {
                 padding: 8px 12px;
                 border: 1px solid #d1d5db;
@@ -242,12 +260,27 @@
             .site-item span {
                 color: #111827;
             }
+
+            .debug-actions {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin-top: 8px;
+            }
+
+            .button:disabled {
+                color: #9ca3af;
+                cursor: not-allowed;
+                background: #f9fafb;
+            }
         </style>
     </head>
 
     <body>
         <div class="container">
             <h1>Options</h1>
+
+            <div class="status-panel" id="autoPipBlockerStatus"></div>
 
             <div class="setting">
                 <div class="setting-info">
@@ -259,6 +292,19 @@
                 </div>
                 <label class="toggle">
                     <input type="checkbox" id="autoPipOnTabSwitch" />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="setting">
+                <div class="setting-info">
+                    <div class="setting-title">Debug Logs</div>
+                    <div class="debug-actions">
+                        <button class="button" id="downloadDebugLog">Download .txt</button>
+                    </div>
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" id="autoPipDebugEnabled" />
                     <span class="slider"></span>
                 </label>
             </div>
@@ -288,6 +334,7 @@
                 </div>
                 <div class="site-list" id="blockedSitesList"></div>
             </div>
+
         </div>
 
         <script src="options.js"></script>

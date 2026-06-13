@@ -1,9 +1,11 @@
 *.zip
 .DS_Store
 node_modules/
+dist/
 playwright-report/
 test-results/
 .playwright/
 tmp/orchestrator-artifacts/
+tmp/local-test-artifacts/
 tmp/windows-debug/
 tmp/orchestrator.local.json
