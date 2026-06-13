@@ -8,7 +8,7 @@ Changelog: [CHANGELOG.md](CHANGELOG.md)
 
 Automatically opens Picture-in-Picture when you switch away from a playing video tab, with one-click manual PiP from the toolbar.
 
-Version 2.0 is a simpler, hardened rewrite: it lazily arms playing videos, preserves site-owned Auto-PiP behavior, cleans up only extension-owned changes, keeps conferencing and chat sites disabled by default, and includes opt-in debug logs for issue reports.
+Version 2.0 is a simpler, hardened rewrite of the same core experience: it lazily arms playing videos, improves repeated tab-switch compatibility, preserves site-owned Auto-PiP behavior, cleans up only extension-owned changes, and includes opt-in debug logs for issue reports.
 <br><br>
 Enjoying the extension?
 
