@@ -124,6 +124,16 @@ For now, a human is the final integration and release gate. Do not place
 personal, VPS, 1Password, billing, release, or unrelated service credentials in
 an agent environment.
 
+### One-time v2.0.1 release authorization
+
+For the explicitly requested v2.0.1 release only, an agent may fast-forward
+`main` from `codex/whatsapp-default-2.0.1`, create and push tag `v2.0.1`, verify
+the tag-driven GitHub archive, and submit that exact verified runtime archive to
+the repository's existing Chrome Web Store listing. This does not authorize a
+force push, another version or channel, permission/secret/billing changes, a new
+store listing, or any future release. The authorization expires when v2.0.1 has
+been submitted and its channel statuses have been reported.
+
 ## Definition of done
 
 A change is complete only when its behavior is covered at the lowest practical
