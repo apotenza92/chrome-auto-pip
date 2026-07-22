@@ -12,8 +12,13 @@
       'teams.microsoft.com',
       'teams.live.com',
       '*.slack.com',
-      '*.discord.com'
+      '*.discord.com',
+      'web.whatsapp.com'
     ],
+    BLOCKLIST_DEFAULTS_VERSION: 1,
+    BLOCKLIST_DEFAULT_ADDITIONS: {
+      1: ['web.whatsapp.com']
+    },
     DEBUG_LOG_LIMIT: 250,
     VIDEO_PLAYING_MESSAGE_THROTTLE_MS: 2000,
     DEFAULT_ACTION_TITLE: 'Picture-in-Picture',
@@ -22,6 +27,7 @@
       autoPipOnTabSwitch: 'autoPipOnTabSwitch',
       autoPipEnabled: 'autoPipEnabled',
       autoPipSiteBlocklist: 'autoPipSiteBlocklist',
+      autoPipBlocklistDefaultsVersion: 'autoPipBlocklistDefaultsVersion',
       autoPipDebugEnabled: 'autoPipDebugEnabled',
       autoPipDebugLog: 'autoPipDebugLog',
       autoPipDebugText: 'autoPipDebugText',

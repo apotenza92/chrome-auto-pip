@@ -16,7 +16,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         'teams.microsoft.com',
         'teams.live.com',
         '*.slack.com',
-        '*.discord.com'
+        '*.discord.com',
+        'web.whatsapp.com'
     ];
 
     let blockedSites = DEFAULT_BLOCKED_SITES.slice();

@@ -2,7 +2,7 @@
   'use strict';
 
   const AutoPip = root.AutoPip;
-  const { DEFAULT_BLOCKED_SITES } = AutoPip.constants;
+  const { DEFAULT_BLOCKED_SITES, BLOCKLIST_DEFAULTS_VERSION } = AutoPip.constants;
   const { debugLog, setNativeAutoPipBlocker, clearNativeAutoPipBlocker } = AutoPip.debug;
   const { normalizeBlocklist, isValidTab, isAutoPipAllowedTab } = AutoPip.urlRules;
   const { injectCheckVideoScript, registerTabForAutoPip, hasAnyFrameTrue } = AutoPip.inject;
@@ -14,10 +14,13 @@
         try {
           await chrome.storage.sync.clear();
           await chrome.storage.local.clear();
-          await chrome.storage.sync.set({
+          const defaults = {
             autoPipOnTabSwitch: true,
-            autoPipSiteBlocklist: DEFAULT_BLOCKED_SITES.slice()
-          });
+            autoPipSiteBlocklist: DEFAULT_BLOCKED_SITES.slice(),
+            autoPipBlocklistDefaultsVersion: BLOCKLIST_DEFAULTS_VERSION
+          };
+          await chrome.storage.sync.set(defaults);
+          await chrome.storage.local.set(defaults);
           AutoPip.state.autoPipOnTabSwitch = true;
           AutoPip.state.autoPipSiteBlocklist = DEFAULT_BLOCKED_SITES.slice();
         } catch (_) { }

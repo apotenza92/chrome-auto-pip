@@ -69,6 +69,7 @@ Default disabled sites:
 - `teams.live.com`
 - `*.slack.com`
 - `*.discord.com`
+- `web.whatsapp.com`
 
 ## How It Works
 

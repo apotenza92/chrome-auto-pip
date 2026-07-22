@@ -11,7 +11,8 @@
         'teams.microsoft.com',
         'teams.live.com',
         '*.slack.com',
-        '*.discord.com'
+        '*.discord.com',
+        'web.whatsapp.com'
     ];
 
     function normalizeHostEntry(value) {

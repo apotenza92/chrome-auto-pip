@@ -1,7 +1,7 @@
 {
   "name": "Automatic Picture-in-Picture (Auto PiP)",
   "description": "Automatic Picture-in-Picture on tab switch, with one-click toolbar PiP, disabled sites, and safer cleanup.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "manifest_version": 3,
   "icons": {
     "128": "assets/icon.png"

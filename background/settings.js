@@ -2,7 +2,12 @@
   'use strict';
 
   const AutoPip = root.AutoPip;
-  const { DEFAULT_BLOCKED_SITES, STORAGE_KEYS } = AutoPip.constants;
+  const {
+    DEFAULT_BLOCKED_SITES,
+    BLOCKLIST_DEFAULTS_VERSION,
+    BLOCKLIST_DEFAULT_ADDITIONS,
+    STORAGE_KEYS
+  } = AutoPip.constants;
   const { normalizeBlocklist } = AutoPip.urlRules;
   const { debugLog } = AutoPip.debug;
 
@@ -20,14 +25,37 @@
     return null;
   }
 
+  function normalizeBlocklistDefaultsVersion(value) {
+    return Number.isInteger(value) && value >= 0 ? value : 0;
+  }
+
+  function applyDefaultBlocklistMigrations(blocklist, storedVersion) {
+    const migratedBlocklist = normalizeBlocklist(blocklist) || [];
+    const fromVersion = normalizeBlocklistDefaultsVersion(storedVersion);
+
+    for (let version = fromVersion + 1; version <= BLOCKLIST_DEFAULTS_VERSION; version += 1) {
+      const additions = BLOCKLIST_DEFAULT_ADDITIONS[version] || [];
+      additions.forEach((entry) => {
+        if (!migratedBlocklist.includes(entry)) migratedBlocklist.push(entry);
+      });
+    }
+
+    return {
+      blocklist: migratedBlocklist,
+      version: Math.max(fromVersion, BLOCKLIST_DEFAULTS_VERSION)
+    };
+  }
+
   async function loadSettings() {
     const state = AutoPip.state;
+    let local = {};
     try {
       try {
-        const local = await chrome.storage.local.get([
+        local = await chrome.storage.local.get([
           STORAGE_KEYS.autoPipOnTabSwitch,
           STORAGE_KEYS.autoPipEnabled,
-          STORAGE_KEYS.autoPipSiteBlocklist
+          STORAGE_KEYS.autoPipSiteBlocklist,
+          STORAGE_KEYS.autoPipBlocklistDefaultsVersion
         ]);
 
         const localBlocklist = normalizeBlocklist(local.autoPipSiteBlocklist);
@@ -43,29 +71,41 @@
       const result = await chrome.storage.sync.get([
         STORAGE_KEYS.autoPipOnTabSwitch,
         STORAGE_KEYS.autoPipEnabled,
-        STORAGE_KEYS.autoPipSiteBlocklist
+        STORAGE_KEYS.autoPipSiteBlocklist,
+        STORAGE_KEYS.autoPipBlocklistDefaultsVersion
       ]);
 
       const migrated = await migrateAutoPipSettings(result);
-      const effective = migrated || result;
+      const effective = { ...result, ...(migrated || {}) };
 
       state.autoPipOnTabSwitch = typeof effective.autoPipOnTabSwitch === 'boolean'
         ? effective.autoPipOnTabSwitch
         : true;
 
       const syncBlocklist = normalizeBlocklist(effective.autoPipSiteBlocklist);
-      const localBlocklist = normalizeBlocklist(state.autoPipSiteBlocklist);
-      const effectiveBlocklist = syncBlocklist || localBlocklist || DEFAULT_BLOCKED_SITES.slice();
-      state.autoPipSiteBlocklist = effectiveBlocklist;
+      const localBlocklist = normalizeBlocklist(local.autoPipSiteBlocklist);
+      const storedDefaultsVersion = Math.max(
+        normalizeBlocklistDefaultsVersion(effective.autoPipBlocklistDefaultsVersion),
+        normalizeBlocklistDefaultsVersion(local.autoPipBlocklistDefaultsVersion)
+      );
+      const migratedBlocklist = applyDefaultBlocklistMigrations(
+        syncBlocklist || localBlocklist || DEFAULT_BLOCKED_SITES.slice(),
+        storedDefaultsVersion
+      );
+      state.autoPipSiteBlocklist = migratedBlocklist.blocklist;
 
-      if (!syncBlocklist) {
-        try { await chrome.storage.sync.set({ autoPipSiteBlocklist: effectiveBlocklist }); } catch (_) { }
-      }
+      try {
+        await chrome.storage.sync.set({
+          autoPipSiteBlocklist: state.autoPipSiteBlocklist,
+          autoPipBlocklistDefaultsVersion: migratedBlocklist.version
+        });
+      } catch (_) { }
 
       try {
         await chrome.storage.local.set({
           autoPipOnTabSwitch: state.autoPipOnTabSwitch,
-          autoPipSiteBlocklist: state.autoPipSiteBlocklist
+          autoPipSiteBlocklist: state.autoPipSiteBlocklist,
+          autoPipBlocklistDefaultsVersion: migratedBlocklist.version
         });
       } catch (_) { }
     } catch (_) {
@@ -74,7 +114,8 @@
       try {
         await chrome.storage.local.set({
           autoPipOnTabSwitch: state.autoPipOnTabSwitch,
-          autoPipSiteBlocklist: state.autoPipSiteBlocklist
+          autoPipSiteBlocklist: state.autoPipSiteBlocklist,
+          autoPipBlocklistDefaultsVersion: BLOCKLIST_DEFAULTS_VERSION
         });
       } catch (_) { }
     } finally {
@@ -156,6 +197,7 @@
 
   AutoPip.settings = {
     migrateAutoPipSettings,
+    applyDefaultBlocklistMigrations,
     loadSettings,
     applyAutoPipOnTabSwitchSetting,
     handleStorageChanged

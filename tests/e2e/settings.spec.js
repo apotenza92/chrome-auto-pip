@@ -10,6 +10,53 @@ async function getSyncSettings(page) {
   }));
 }
 
+test('default blocklist migration adds WhatsApp once and preserves custom choices', async ({ context }) => {
+  const worker = context.__autoPipExtensionWorker || context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+
+  const result = await worker.evaluate(async () => {
+    await globalThis.AutoPip.state.settingsReady;
+    const readSettings = async () => ({
+      sync: await chrome.storage.sync.get([
+        'autoPipSiteBlocklist',
+        'autoPipBlocklistDefaultsVersion'
+      ]),
+      local: await chrome.storage.local.get([
+        'autoPipSiteBlocklist',
+        'autoPipBlocklistDefaultsVersion'
+      ])
+    });
+
+    const initial = await readSettings();
+    const legacySettings = {
+      autoPipSiteBlocklist: ['custom.example'],
+      autoPipBlocklistDefaultsVersion: 0
+    };
+    await chrome.storage.sync.set(legacySettings);
+    await chrome.storage.local.set(legacySettings);
+    await globalThis.AutoPip.settings.loadSettings();
+    const migrated = await readSettings();
+
+    const userSettings = {
+      autoPipSiteBlocklist: ['custom.example'],
+      autoPipBlocklistDefaultsVersion: 1
+    };
+    await chrome.storage.sync.set(userSettings);
+    await chrome.storage.local.set(userSettings);
+    await globalThis.AutoPip.settings.loadSettings();
+    const afterRemoval = await readSettings();
+
+    return { initial, migrated, afterRemoval };
+  });
+
+  expect(result.initial.sync.autoPipSiteBlocklist).toContain('web.whatsapp.com');
+  expect(result.initial.sync.autoPipBlocklistDefaultsVersion).toBe(1);
+  expect(result.migrated.sync.autoPipSiteBlocklist).toEqual(['custom.example', 'web.whatsapp.com']);
+  expect(result.migrated.local.autoPipSiteBlocklist).toEqual(['custom.example', 'web.whatsapp.com']);
+  expect(result.migrated.sync.autoPipBlocklistDefaultsVersion).toBe(1);
+  expect(result.afterRemoval.sync.autoPipSiteBlocklist).toEqual(['custom.example']);
+  expect(result.afterRemoval.local.autoPipSiteBlocklist).toEqual(['custom.example']);
+});
+
 async function setToggle(page, id, value) {
   await page.waitForFunction((targetId) => {
     const el = document.getElementById(targetId);

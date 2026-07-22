@@ -135,7 +135,8 @@ function defaultDisabledSitesCheck() {
     'teams.microsoft.com',
     'teams.live.com',
     '*.slack.com',
-    '*.discord.com'
+    '*.discord.com',
+    'web.whatsapp.com'
   ];
   const files = ['background/constants.js', 'options.js', 'scripts/lib/settings.js'];
   const missing = [];

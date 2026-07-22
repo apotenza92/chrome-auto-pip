@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-07-22
+
+### Fixed
+- Disabled Auto PiP on WhatsApp Web by default so the extension does not compete with WhatsApp's call-owned picture-in-picture interface.
+- Added a one-time default-blocklist migration for existing installations that preserves custom entries and does not re-add WhatsApp after the user removes it.
+
 ## [2.0.0] - 2026-06-12
 
 ### Changed
